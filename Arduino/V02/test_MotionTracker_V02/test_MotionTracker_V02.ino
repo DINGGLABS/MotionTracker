@@ -46,21 +46,21 @@
 // [D11]			
 // D12		PB2		MOSI
 // D13		PB3		MISO
-// D14		PB4		RED
-// D15		PB5		BLUE
-// D16		PB6		GREEN
-// D17#		PB7		-
+// D14		PB4		_
+// D15		PB5		-
+// D16		PB6		HOLD
+// D17#		PB7		RED
 // D18		PC7		BUTTON
-// D19#		PC6		-
+// D19#		PC6		BLUE
 // [D20]			
-// D21#		PC5		HOLD
+// D21#		PC5		GREEN
 // D22		PC4		WP
 
 /* MotionTracker_V01 -> Minimus 32 */
 #define BUTTON    18
-#define RED       14
-#define GREEN     16
-#define BLUE      15
+#define RED       17
+#define GREEN     21
+#define BLUE      19
 //#define MOSI      12 
 //#define SCK       10
 //#define MISO      13
@@ -68,7 +68,7 @@
 #define CS_G       6
 #define INT2_XM    2
 #define INT1_XM    1
-#define HOLD      21
+#define HOLD      16
 #define WP        22
 #define CS_F       7
 #define DRDY_G     4
@@ -78,8 +78,8 @@
 /* unused PINS */
 #define UU_0       8
 #define UU_1       9
-#define UU_2      17
-#define UU_3      19
+#define UU_2      14
+#define UU_3      15
 
 /* port manipulation makros */
 #ifndef setBit
