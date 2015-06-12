@@ -26,6 +26,14 @@
 #define KNOCK_DELAY		       200    // delay between knocks
 #define HANDSHAKE_MESSAGE        ("knock")    // handshacke key
 
+/* sensor defines */
+#define NUMBER_OF_DIFFERENT_DATA        11    // t, ax, ay, az, Bx, By, Bz, wx, wy, wz, T (in this order!)
+#define MEAN                            10    // number of data to summarize before saving
+//#define MEDIAN                        true    // comment out to use MEAN calculation
+
+/* timer interrupt */               // 78 -> 10ms, 117 -> 15ms, 156 -> 20ms
+#define INTERRUPT_FREQUENCY_DIVISOR_1  156//117//78    // t_isr = 1/(8000000/(prescaler*VALUE))
+
 /* Includes --------------------------------------------------- */
 #include <avr/sleep.h>
 #include <avr/interrupt.h>
@@ -158,14 +166,23 @@ byte event = NO_EVENT;
 unsigned long us, us_ref;
 //unsigned long us_ref = micros();
 
-/* timer interrupt counters (have to be defined as volatile!) */
-volatile unsigned int timerInterruptCounter = 0;
-
 /* using HW SPI to communicate with the sensor */
 Adafruit_LSM9DS0 lsm = Adafruit_LSM9DS0(CS_XM, CS_G, 1000);
 
+/* sensor event variables */
+sensors_event_t accel, mag, gyro, temp;
+
+/* timer interrupt counter (have to be defined as volatile!) */
+volatile unsigned int timerInterruptCounter = 0;
+
 /* sensor data array */
-//int dataArray[10];
+#ifdef MEDIAN
+float dataArray2D[MEAN][NUMBER_OF_DIFFERENT_DATA];  //blup: RAM problem?
+#endif
+#ifndef MEDIAN
+float dataArray[NUMBER_OF_DIFFERENT_DATA];
+#endif
+byte meanCntr = 0;
 
 /** ===========================================================
  * \fn      setup
@@ -214,7 +231,7 @@ void setup()
   
   /* send something (serial data) to establish contact until receiver responds */
   establishContact();
-  delay(2000);
+  delay(1000);
   
   /* Initialise the sensor */
   if(!lsm.begin())
@@ -227,6 +244,8 @@ void setup()
   Serial.println(F("Found LSM9DS0 9DOF"));
   digitalWrite(GREEN,LOW);
   
+//  /* initialize timer interrupt for the sensor */
+//  initTimerInterrupt_CTC_1();
   
   /* Display some basic information on this sensor */
   displaySensorDetails();
@@ -248,9 +267,6 @@ void setup()
   //  PRR0 = ;
   //  PRR1 = ;
   
-//  /* initialize timer interrupt for the piezo */
-//  initTimerInterrupt_CTC_3();
-  
   
   Serial.println("end setup");
   Serial.println("start loop...");
@@ -269,33 +285,140 @@ void setup()
  ============================================================== */
 void loop()
 { 
-/* send data */
-  /* time in us */
-  while ((micros() - us_ref) < 100000);  // wait remaining 100ms
+  /* get sensor data */
+  lsm.getEvent(&accel, &mag, &gyro, &temp);
+  
+  /* wait remaining 10ms */
+  while ((micros() - us_ref) < 10000);   // wait remaining 10ms
   unsigned int dt = micros() - us_ref;   // calculate dt
   us_ref = micros();                     // set new timing reference
-  Serial.print(dt); Serial.print(", ");                      // dt
   
-  /* get a new sensor event */
-  sensors_event_t accel, mag, gyro, temp;
-  lsm.getEvent(&accel, &mag, &gyro, &temp); 
+  /* collect data */
+  #ifdef MEDIAN
+  {
+    dataArray2D[meanCntr][0]  = dt;
+    dataArray2D[meanCntr][1]  = accel.acceleration.x;
+    dataArray2D[meanCntr][2]  = accel.acceleration.y;
+    dataArray2D[meanCntr][3]  = accel.acceleration.z;
+    dataArray2D[meanCntr][4]  = mag.magnetic.x;
+    dataArray2D[meanCntr][5]  = mag.magnetic.y;
+    dataArray2D[meanCntr][6]  = mag.magnetic.z;
+    dataArray2D[meanCntr][7]  = gyro.gyro.x;
+    dataArray2D[meanCntr][8]  = gyro.gyro.y;
+    dataArray2D[meanCntr][9]  = gyro.gyro.z;
+    dataArray2D[meanCntr][10] = temp.temperature;
+    
+    meanCntr++;
+    
+    if (meanCntr >= MEAN)
+    {
+      meanCntr = 0;
+      
+      /* get MEDIAN */
+      for (byte i = 0; i < MEAN; i++) qsort(dataArray2D[i], MEAN, sizeof(float), cmpfunc);
   
-  /* print acceleration data in m/s^2 */
-  Serial.print(accel.acceleration.x); Serial.print(", ");    // ax
-  Serial.print(accel.acceleration.y); Serial.print(", ");    // ay
-  Serial.print(accel.acceleration.z); Serial.print(", ");    // az
+      /* print timestamp in us */
+      Serial.print(micros()); Serial.print(", ");                      // t
   
-  /* print heading in ° */
-  float heading = 180 * atan2(mag.magnetic.z, mag.magnetic.y)/PI;
-  if (heading < 0) heading += 360;
-  Serial.print(heading); Serial.print(", ");                 // heading
+      /* print delta time in us */
+      Serial.print(dataArray2D[MEAN/2][0] * MEAN); Serial.print(", "); // dt
+          
+      /* print acceleration data in m/s^2 */
+      Serial.print(dataArray2D[MEAN/2][1]); Serial.print(", ");        // ax
+      Serial.print(dataArray2D[MEAN/2][2]); Serial.print(", ");        // ay
+      Serial.print(dataArray2D[MEAN/2][3]); Serial.print(", ");        // az
+      
+      /* print magnetometer data in Gs */
+      Serial.print(dataArray2D[MEAN/2][4]); Serial.print(", ");        // Bx
+      Serial.print(dataArray2D[MEAN/2][5]); Serial.print(", ");        // By
+      Serial.print(dataArray2D[MEAN/2][6]); Serial.print(", ");        // Bz
+      
+      /* print gyroscop data in °/s */
+      Serial.print(dataArray2D[MEAN/2][7]); Serial.print(", ");        // wx
+      Serial.print(dataArray2D[MEAN/2][8]); Serial.print(", ");        // wy
+      Serial.print(dataArray2D[MEAN/2][9]); Serial.print(", ");        // wz
+      
+      /* print temp data in °C */
+      Serial.println(dataArray2D[MEAN/2][10]);                         // T
+    }
+  }
+  #endif
+  #ifndef MEDIAN
+  {
+    dataArray[0]  += dt;
+    dataArray[1]  += accel.acceleration.x;
+    dataArray[2]  += accel.acceleration.y;
+    dataArray[3]  += accel.acceleration.z;
+    dataArray[4]  += mag.magnetic.x;
+    dataArray[5]  += mag.magnetic.y;
+    dataArray[6]  += mag.magnetic.z;
+    dataArray[7]  += gyro.gyro.x;
+    dataArray[8]  += gyro.gyro.y;
+    dataArray[9]  += gyro.gyro.z;
+    dataArray[10] += temp.temperature;
+    
+    meanCntr++;
+    
+    if (meanCntr >= MEAN)
+    {
+      meanCntr = 0;
+      
+      /* divide data by MEAN */
+      for (byte i = 0; i < NUMBER_OF_DIFFERENT_DATA; i++) dataArray[i] /= MEAN;
   
-  /* print gyroscop data in ° */
-  float Gdt = (float)dt / 1000000;
-  Serial.print(gyro.gyro.x * Gdt); Serial.print(", ");       // Gx
-  Serial.print(gyro.gyro.y * Gdt); Serial.print(", ");       // Gy
-  Serial.println(gyro.gyro.z * Gdt);                         // Gz
+      /* print timestamp in us */
+      Serial.print(micros()); Serial.print(", ");            // t
   
+      /* print delta time in us */
+      Serial.print(dataArray[0] * MEAN); Serial.print(", "); // dt
+          
+      /* print acceleration data in m/s^2 */
+      Serial.print(dataArray[1]); Serial.print(", ");        // ax
+      Serial.print(dataArray[2]); Serial.print(", ");        // ay
+      Serial.print(dataArray[3]); Serial.print(", ");        // az
+      
+      /* print magnetometer data in Gs */
+      Serial.print(dataArray[4]); Serial.print(", ");        // Bx
+      Serial.print(dataArray[5]); Serial.print(", ");        // By
+      Serial.print(dataArray[6]); Serial.print(", ");        // Bz
+      
+      /* print gyroscop data in °/s */
+      Serial.print(dataArray[7]); Serial.print(", ");        // wx
+      Serial.print(dataArray[8]); Serial.print(", ");        // wy
+      Serial.print(dataArray[9]); Serial.print(", ");        // wz
+      
+      /* print temp data in °C */
+      Serial.println(dataArray[10]);                         // T
+      
+      /* reset data array */
+      for (byte i = 0; i < NUMBER_OF_DIFFERENT_DATA; i++) dataArray[i] = 0;
+    }
+  }
+  #endif
+  
+  
+  
+//  Serial.print(millis()); Serial.print(", ");                // millis
+//  Serial.print(dt); Serial.print(", ");                      // dt
+//  
+//  cli();  // disable intterupts to prevent wrong transmissions
+//  
+//  /* print acceleration data in m/s^2 */
+//  Serial.print(accel.acceleration.x); Serial.print(", ");    // ax
+//  Serial.print(accel.acceleration.y); Serial.print(", ");    // ay
+//  Serial.print(accel.acceleration.z); Serial.print(", ");    // az
+//  
+////  /* print heading in ° */
+////  float heading = 180 * atan2(mag.magnetic.z, mag.magnetic.y)/PI;
+////  if (heading < 0) heading += 360;
+////  Serial.print(heading); Serial.print(", ");                 // heading
+////  
+////  /* print gyroscop data in ° */
+////  float Gdt = (float)dt / 1000000;
+////  Serial.print(gyro.gyro.x * Gdt); Serial.print(", ");       // Gx
+////  Serial.print(gyro.gyro.y * Gdt); Serial.print(", ");       // Gy
+////  Serial.println(gyro.gyro.z * Gdt);                         // Gz
+//  
 //  /* print magnetometer data in Gs */
 //  Serial.print(mag.magnetic.x); Serial.print(", ");          // Bx
 //  Serial.print(mag.magnetic.y); Serial.print(", ");          // By
@@ -305,12 +428,147 @@ void loop()
 //  Serial.print(gyro.gyro.x); Serial.print(", ");             // wx
 //  Serial.print(gyro.gyro.y); Serial.print(", ");             // wy
 //  Serial.println(gyro.gyro.z);                               // wz
-      
-      
+//  
+//  sei();
+}
 
-        
+int cmpfunc (const void * a, const void * b)
+{
+  return ( *(int*)a - *(int*)b );
+}
 
-// /* get current events */
+///** ===========================================================
+// * \fn      ISR (timer1 OCIE1A interrupt TIMER1_COMPA)
+// * \brief   interrupt service routine (handler) which will be 
+// *          called every few milli seconds to control the
+// *          sensor reading
+// *          (f_isr = fcpu / (prescaler * cnt))
+// *
+// * \param   'TIMER1_COMPA vector'
+// * \return  -
+// ============================================================== */
+//ISR(TIMER1_COMPA_vect)
+//{
+//  /* test interrupt */
+//  PORTD ^= (1 << 2);      // toggle PD2 pin
+//  
+//  /* increase timer interrupt counter */
+//  timerInterruptCounter++;
+//  
+//  /* get a new sensor event */
+//  //lsm.getEvent(&accel, &mag, &gyro, &temp);
+//}
+
+/** ===========================================================
+ * \fn      establishContact
+ * \brief   sends given handshake String continously until
+ *          receiver responds with something (it doesn't matter
+ *          what). Flushs the receive buffer afterwards
+ *
+ * \param   -
+ * \return  -
+ ============================================================== */
+void establishContact()
+{
+  while (Serial.available() <= 0)
+  {
+    Serial.println(HANDSHAKE_MESSAGE);
+    delay(KNOCK_DELAY);
+  }
+  
+  /* flush the receive buffer  */
+  while (Serial.available()) Serial.read();
+}
+
+/** ===========================================================
+ * \fn      displaySensorDetails
+ * \brief   displays some basic information on this sensor from
+ *          the unified sensor API sensor_t type (see
+ *          Adafruit_Sensor for more information)
+ *
+ * \param   -
+ * \return  -
+ ============================================================== */
+void displaySensorDetails(void)
+{
+  sensor_t accel, mag, gyro, temp;
+  lsm.getSensor(&accel, &mag, &gyro, &temp);
+    
+  Serial.println(F("------------------------------------"));
+  Serial.print  (F("Sensor:       ")); Serial.println(accel.name);
+  Serial.print  (F("Driver Ver:   ")); Serial.println(accel.version);
+  Serial.print  (F("Unique ID:    ")); Serial.println(accel.sensor_id);
+  Serial.print  (F("Max Value:    ")); Serial.print(accel.max_value); Serial.println(F(" m/s^2"));
+  Serial.print  (F("Min Value:    ")); Serial.print(accel.min_value); Serial.println(F(" m/s^2"));
+  Serial.print  (F("Resolution:   ")); Serial.print(accel.resolution); Serial.println(F(" m/s^2"));  
+  Serial.println(F("------------------------------------"));
+  Serial.println(F(""));
+
+  Serial.println(F("------------------------------------"));
+  Serial.print  (F("Sensor:       ")); Serial.println(mag.name);
+  Serial.print  (F("Driver Ver:   ")); Serial.println(mag.version);
+  Serial.print  (F("Unique ID:    ")); Serial.println(mag.sensor_id);
+  Serial.print  (F("Max Value:    ")); Serial.print(mag.max_value); Serial.println(F(" uT"));
+  Serial.print  (F("Min Value:    ")); Serial.print(mag.min_value); Serial.println(F(" uT"));
+  Serial.print  (F("Resolution:   ")); Serial.print(mag.resolution); Serial.println(F(" uT"));  
+  Serial.println(F("------------------------------------"));
+  Serial.println(F(""));
+
+  Serial.println(F("------------------------------------"));
+  Serial.print  (F("Sensor:       ")); Serial.println(gyro.name);
+  Serial.print  (F("Driver Ver:   ")); Serial.println(gyro.version);
+  Serial.print  (F("Unique ID:    ")); Serial.println(gyro.sensor_id);
+  Serial.print  (F("Max Value:    ")); Serial.print(gyro.max_value); Serial.println(F(" rad/s"));
+  Serial.print  (F("Min Value:    ")); Serial.print(gyro.min_value); Serial.println(F(" rad/s"));
+  Serial.print  (F("Resolution:   ")); Serial.print(gyro.resolution); Serial.println(F(" rad/s"));  
+  Serial.println(F("------------------------------------"));
+  Serial.println(F(""));
+
+  Serial.println(F("------------------------------------"));
+  Serial.print  (F("Sensor:       ")); Serial.println(temp.name);
+  Serial.print  (F("Driver Ver:   ")); Serial.println(temp.version);
+  Serial.print  (F("Unique ID:    ")); Serial.println(temp.sensor_id);
+  Serial.print  (F("Max Value:    ")); Serial.print(temp.max_value); Serial.println(F(" C"));
+  Serial.print  (F("Min Value:    ")); Serial.print(temp.min_value); Serial.println(F(" C"));
+  Serial.print  (F("Resolution:   ")); Serial.print(temp.resolution); Serial.println(F(" C"));  
+  Serial.println(F("------------------------------------"));
+  Serial.println(F(""));
+  
+  delay(2000);
+}
+
+/** ===========================================================
+ * \fn      configureSensor
+ * \brief   configures the gain and integration time for the
+ *          TSL2561
+ *
+ * \param   -
+ * \return  -
+ ============================================================== */
+void configureSensor(void)
+{
+  // 1.) Set the accelerometer range
+  lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_2G);
+  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_4G);
+  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_6G);
+  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_8G);
+  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_16G);
+  
+  // 2.) Set the magnetometer sensitivity
+  lsm.setupMag(lsm.LSM9DS0_MAGGAIN_2GAUSS);
+  //lsm.setupMag(lsm.LSM9DS0_MAGGAIN_4GAUSS);
+  //lsm.setupMag(lsm.LSM9DS0_MAGGAIN_8GAUSS);
+  //lsm.setupMag(lsm.LSM9DS0_MAGGAIN_12GAUSS);
+
+  // 3.) Setup the gyroscope
+  lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_245DPS);
+  //lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_500DPS);
+  //lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_2000DPS);
+}
+
+
+
+// /* get current state machine event */
 // event = getButtonEvent(BUTTON, MAX_DURATION_SHORTCLICK, MIN_DURATION_LONGCLICK);
 //// if (/*speicher voll*/) event = MEMORY_FULL;
 //
@@ -384,115 +642,9 @@ void loop()
 //   break;
 // }
 // /* end of state machine ------------------------------------- */
-}
+//}
 
-/** ===========================================================
- * \fn      establishContact
- * \brief   sends given handshake String continously until
- *          receiver responds with something (it doesn't matter
- *          what). Flushs the receive buffer afterwards
- *
- * \param   -
- * \return  -
- ============================================================== */
-void establishContact()
-{
-  while (Serial.available() <= 0)
-  {
-    Serial.println(HANDSHAKE_MESSAGE);
-    delay(KNOCK_DELAY);
-  }
-  
-  /* flush the receive buffer  */
-  while (Serial.available()) Serial.read();
-}
 
-/** ===========================================================
- * \fn      displaySensorDetails
- * \brief   displays some basic information on this sensor from
- *          the unified sensor API sensor_t type (see
- *          Adafruit_Sensor for more information)
- *
- * \param   -
- * \return  -
- ============================================================== */
-void displaySensorDetails(void)
-{
-  sensor_t accel, mag, gyro, temp;
-  
-  lsm.getSensor(&accel, &mag, &gyro, &temp);
-    
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(accel.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(accel.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(accel.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(accel.max_value); Serial.println(F(" m/s^2"));
-  Serial.print  (F("Min Value:    ")); Serial.print(accel.min_value); Serial.println(F(" m/s^2"));
-  Serial.print  (F("Resolution:   ")); Serial.print(accel.resolution); Serial.println(F(" m/s^2"));  
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
-
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(mag.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(mag.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(mag.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(mag.max_value); Serial.println(F(" uT"));
-  Serial.print  (F("Min Value:    ")); Serial.print(mag.min_value); Serial.println(F(" uT"));
-  Serial.print  (F("Resolution:   ")); Serial.print(mag.resolution); Serial.println(F(" uT"));  
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
-
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(gyro.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(gyro.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(gyro.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(gyro.max_value); Serial.println(F(" rad/s"));
-  Serial.print  (F("Min Value:    ")); Serial.print(gyro.min_value); Serial.println(F(" rad/s"));
-  Serial.print  (F("Resolution:   ")); Serial.print(gyro.resolution); Serial.println(F(" rad/s"));  
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
-
-  Serial.println(F("------------------------------------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(temp.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(temp.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(temp.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(temp.max_value); Serial.println(F(" C"));
-  Serial.print  (F("Min Value:    ")); Serial.print(temp.min_value); Serial.println(F(" C"));
-  Serial.print  (F("Resolution:   ")); Serial.print(temp.resolution); Serial.println(F(" C"));  
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
-  
-  delay(500);
-}
-
-/** ===========================================================
- * \fn      configureSensor
- * \brief   configures the gain and integration time for the
- *          TSL2561
- *
- * \param   -
- * \return  -
- ============================================================== */
-void configureSensor(void)
-{
-  // 1.) Set the accelerometer range
-  lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_2G);
-  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_4G);
-  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_6G);
-  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_8G);
-  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_16G);
-  
-  // 2.) Set the magnetometer sensitivity
-  lsm.setupMag(lsm.LSM9DS0_MAGGAIN_2GAUSS);
-  //lsm.setupMag(lsm.LSM9DS0_MAGGAIN_4GAUSS);
-  //lsm.setupMag(lsm.LSM9DS0_MAGGAIN_8GAUSS);
-  //lsm.setupMag(lsm.LSM9DS0_MAGGAIN_12GAUSS);
-
-  // 3.) Setup the gyroscope
-  lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_245DPS);
-  //lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_500DPS);
-  //lsm.setupGyro(lsm.LSM9DS0_GYROSCALE_2000DPS);
-}
 
 ///** ===========================================================
 // * \fn      getButtonEvent
@@ -737,24 +889,23 @@ void configureSensor(void)
 //  if (!digitalRead(inputPin)) return true;
 //  else return false;
 //}
-
+//
 ///** ===========================================================
-// * \fn      ISR (timer3 OCIE3A interrupt TIMER3_COMPA)
+// * \fn      ISR (timer1 OCIE1A interrupt TIMER1_COMPA)
 // * \brief   interrupt service routine (handler) which will be 
-// *          called every few micro seconds to control the
-// *          piezo
+// *          called every few milli seconds to control the
+// *          sensor reading
 // *          (f_isr = fcpu / (prescaler * cnt))
 // *
-// * \param   'TIMER3_COMPA vector'
+// * \param   'TIMER1_COMPA vector'
 // * \return  -
 // ============================================================== */
-//ISR(TIMER3_COMPA_vect)
+//ISR(TIMER1_COMPA_vect)
 //{
 ////  /* test interrupt */
-////  PORTD ^= (1 << 1);      
+////  PORTD ^= (1 << 2);      // toggle PD2 pin
 //  
 ////  cli();
-//  
 //  /* increase global timer interrupt counter */
 //  timerInterruptCounterPiezo++; 
 //      
@@ -767,15 +918,15 @@ void configureSensor(void)
 //    /* toggle the piezo on base of current desired state */
 //    if (piezoOn) PORTC ^= (1 << 7);  // PIEZO = PC7
 //  }
-//  
 ////  sei();
 //}
-
+//
 ///** ===========================================================
 // * \fn      initTimerInterrupt_CTC_0
 // * \brief   initializes the timer 0 and releated Clear Timer on
 // *          Compare match (CTC) interrupt
-// *          (ATmega32U4)
+// *          (!Attention: Arduino uses timer 0 for delay-
+// *          functions by the ATmegas)
 // *
 // * \param   -
 // * \return  -
@@ -783,59 +934,37 @@ void configureSensor(void)
 //void initTimerInterrupt_CTC_0()
 //{
 //  /* init timer0 and releated interrupt (t_isr = 1/(8MHz/(prescaler*cnt))) */
-//  TCCR0A = (1 << WGM01);      // enable CTC (Clear Timer on Compare match) mode
-//  TCCR0B = 0x02;              // prescaler = 8 (0x01 -> /1, 0x02 -> /8, 0x03 -> /64, ...)
-//    
-//  TIMSK0 = (1 << OCIE0A);     // set bit 1 to enable timer0 output compare match A interrupt (TIMER0_COMPA)
+//  TCCR0A = (1 << WGM01);   // enable CTC (Clear Timer on Compare match) mode
+//  TCCR0B = (1 << CS02) | (1 << CS00);  // prescaler (CS00 = 1, CS01 = 8, CS00&CS01 = 64, CS02 = 256, CS00&CS02 = 1024)
+//  
+//  TIMSK0 = (1 << OCIE0A);  // set bit 1 to enable timer0 output compare match A interrupt (TIMER0_COMPA)
 //  OCR0A = INTERRUPT_FREQUENCY_DIVISOR_0;  // define output compare register A value (0... 255)
 //
 //  /* reset timer 0 counter register */
 //  TCNT0 = 0x00;
 //}
 
-///** ===========================================================
-// * \fn      initTimerInterrupt_CTC_1
-// * \brief   initializes the timer 1 and releated Clear Timer on
-// *          Compare match (CTC) interrupt
-// *          (ATmega32U4)
-// *
-// * \param   -
-// * \return  -
-// ============================================================== */
-//void initTimerInterrupt_CTC_1()
-//{
-//  /* init timer1 and releated interrupt (t_isr = 1/(8MHz/(prescaler*cnt))) */
-//  TCCR1A = 0x00;         // enable CTC (Clear Timer on Compare match) mode
-//  TCCR1B = ((1 << WGM12) | 0x02);  // prescaler = 8 (0x01 -> /1, 0x02 -> /8, 0x03 -> /64, ...)
-//    
-//  TIMSK1 = (1 << OCIE1A);     // set bit 1 to enable timer1 output compare match A interrupt (TIMER1_COMPA)
-//  OCR1A = INTERRUPT_FREQUENCY_DIVISOR_1;  // define output compare register A value (0... 65535)
-//
-//  /* reset timer 1 counter register */
-//  TCNT1 = 0x00;
-//}
+/** ===========================================================
+ * \fn      initTimerInterrupt_CTC_1
+ * \brief   initializes the timer 1 and releated Clear Timer on
+ *          Compare match (CTC) interrupt
+ *          (ATmega32U2)
+ *
+ * \param   -
+ * \return  -
+ ============================================================== */
+void initTimerInterrupt_CTC_1()
+{
+  /* init timer1 and releated interrupt (t_isr = 1/(8MHz/(prescaler*cnt))) */
+  TCCR1A = 0x00;         // enable CTC (Clear Timer on Compare match) mode
+  TCCR1B = ((1 << WGM12) | (1 << CS10) | (1 << CS12));  // prescaler = 1024
+  
+  TIMSK1 = (1 << OCIE1A);     // set bit 1 to enable timer1 output compare match A interrupt (TIMER1_COMPA)
+  OCR1A = INTERRUPT_FREQUENCY_DIVISOR_1;  // define output compare register A value (0... 65535)
 
-///** ===========================================================
-// * \fn      initTimerInterrupt_CTC_3
-// * \brief   initializes the timer 3 and releated Clear Timer on
-// *          Compare match (CTC) interrupt
-// *          (ATmega32U4)
-// *
-// * \param   -
-// * \return  -
-// ============================================================== */
-//void initTimerInterrupt_CTC_3()
-//{
-//  /* init timer2 and releated interrupt (t_isr = 1/(8MHz/(prescaler*cnt))) */
-//  TCCR3A = 0x00;      // enable CTC (Clear Timer on Compare match) mode
-//  TCCR3B = ((1 << WGM32) | 0x02);      // prescaler = 8 (0x01 -> /1, 0x02 -> /8, 0x03 -> /32, 0x04 -> /64, ...)
-//    
-//  TIMSK3 = (1 << OCIE3A);     // set bit 1 to enable timer0 output compare match A interrupt (TIMER0_COMPA)
-//  OCR3A = INTERRUPT_FREQUENCY_DIVISOR_2;  // define output compare register A value (0... 255)
-//
-//  /* reset timer 0 counter register */
-//  TCNT3 = 0x00;
-//}
+  /* reset timer 1 counter register */
+  TCNT1 = 0x00;
+}
 
 /**
  * @}
