@@ -8,7 +8,7 @@ int Y = 600;
 int REF_H = 400;
 int REF_B = 150;
 
-String FILENAME = "data/z.csv";
+String FILENAME = "data/achti.csv";
 
 int NUMBER_OF_SENSOR_DATA = 8;  // t, ax, ay, az, h, Gxy, Gxz, Gyz (in this order!)
 int NUMBER_OF_DATA_USED_TO_CALIBRATE = 150;  // that means 5sec calibrating!
@@ -19,10 +19,11 @@ boolean A_OFFSET = true;
 
 boolean G_OFFSET = false;
 boolean TRAPEZ = false;    // alternative integration
+boolean EXP_ERROR_CORRECTION = false;
 
-int ma = 100;
-int mv = 100;
-int ms = 100;
+int ma = 10;
+int mv = 10;
+int ms = 10;
 
 /* global variables */
 int mX, mY;    // mouse coordinates
@@ -73,15 +74,15 @@ void setup()
   for (int i = 0; i < numberOfRows; i++)
   {
     data.get(i)[0] /= 1000;
-    println(str(data.get(i)));
+    //println(str(data.get(i)));
   }
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/ 
-  /* ROTATE data vectors to fit them to the room coordinate system */
+  /* rotate data vectors to fit them to the room coordinate system */
   if (ROTATE)
   {
-    println("ROTATE data vectors");
+    println("rotate data vectors");
     for (int i = 0; i < numberOfRows; i++)
     {
       /* collect current data */
@@ -93,15 +94,15 @@ void setup()
       //println(str(data.get(i)));
       //println(sqrt(data.get(i)[1]*data.get(i)[1] + data.get(i)[2]*data.get(i)[2] + data.get(i)[3]*data.get(i)[3]));
       
-      /* ROTATE */
+      /* rotate */
       a = rotateArrayVector(a, roll, pitch, heading);
       
-      /* save ROTATEd data */
+      /* save rotated data */
       data.get(i)[1] = a[0];
       data.get(i)[2] = a[1];
       data.get(i)[3] = a[2];
       
-      println(str(data.get(i)));
+      //println(str(data.get(i)));
       //println(sqrt(data.get(i)[1]*data.get(i)[1] + data.get(i)[2]*data.get(i)[2] + data.get(i)[3]*data.get(i)[3]));
     }
   }
@@ -141,7 +142,7 @@ void setup()
   float g_roll    = acos((ay_c*ay_c + az_c*az_c)/(sqrt((ay_c*ay_c + az_c*az_c) * (ax_c*ax_c + ay_c*ay_c + az_c*az_c)))) * 180/PI;  // x-axis rotation angle
   float g_pitch   = acos((ax_c*ax_c + az_c*az_c)/(sqrt((ax_c*ax_c + az_c*az_c) * (ax_c*ax_c + ay_c*ay_c + az_c*az_c)))) * 180/PI;  // y-axis rotation angle
   float g_heading = acos((ax_c*ax_c + ay_c*ay_c)/(sqrt((ax_c*ax_c + ay_c*ay_c) * (ax_c*ax_c + ay_c*ay_c + az_c*az_c)))) * 180/PI;  // z-axis rotation angle
-  println((sqrt((ax_c*ax_c + ay_c*ay_c) * (ax_c*ax_c + ay_c*ay_c + az_c*az_c))));
+  //println((sqrt((ax_c*ax_c + ay_c*ay_c) * (ax_c*ax_c + ay_c*ay_c + az_c*az_c))));
   if(g_roll != g_roll) { g_roll = 0; }
   if(g_pitch != g_pitch) { g_pitch = 0; }
   if(g_heading != g_heading) { g_heading = 0; }
@@ -173,11 +174,11 @@ void setup()
     //println(str(data.get(i)));
     //println(sqrt(data.get(i)[1]*data.get(i)[1] + data.get(i)[2]*data.get(i)[2] + data.get(i)[3]*data.get(i)[3]));
     
-    /* ROTATE by the g-error */
+    /* rotate by the g-error */
     float a[] = {data.get(i)[1], data.get(i)[2], data.get(i)[3]};
     a = rotateArrayVector(a, g_roll, g_pitch, g_heading);
     
-    /* save ROTATEd data */
+    /* save rotated data */
     if (G_ROTATION)
     {
       data.get(i)[1] = a[0];
@@ -244,32 +245,74 @@ void setup()
     
     float v[] = {vx_neu, vy_neu, vz_neu}; 
     velocityVectors.add(i, v);
+    
+//    print(i + ":");
+//    print("\t");
+//    println(str(velocityVectors.get(i)));
   }
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/ 
   /* velocity exponential error correction */
-  println("velocity exponential error correction");
-  float vx_start = velocityVectors.get(0)[0];
-  float vy_start = velocityVectors.get(0)[1];
-  float vz_start = velocityVectors.get(0)[2];
-  float vx_end = velocityVectors.get(numberOfRows-1)[0];
-  float vy_end = velocityVectors.get(numberOfRows-1)[1];
-  float vz_end = velocityVectors.get(numberOfRows-1)[2];
-  
-  double expValue_x = root(numberOfRows, vx_end/vx_start);
-  double expValue_y = root(numberOfRows, vy_end/vy_start);
-  double expValue_z = root(numberOfRows, vz_end/vz_start);
-  
-  for (int i = 1; i < numberOfRows; i++)
+  if (EXP_ERROR_CORRECTION)
   {
-    vx_neu -= vx_start * expValue_x^i;
-    vy_neu -= 
-    vz_neu -= 
+    println("velocity exponential error correction");
+    float vx_start = velocityVectors.get(2)[0];
+    float vy_start = velocityVectors.get(2)[1];
+    float vz_start = velocityVectors.get(2)[2];
+    float vx_end = velocityVectors.get(numberOfRows-1)[0];
+    float vy_end = velocityVectors.get(numberOfRows-1)[1];
+    float vz_end = velocityVectors.get(numberOfRows-1)[2];
+    
+    double expValue_x = root(numberOfRows, abs(vx_end)/abs(vx_start));  // e_v = sqrt(x, y/y0)
+    double expValue_y = root(numberOfRows, abs(vy_end)/abs(vy_start));
+    double expValue_z = root(numberOfRows, abs(vz_end)/abs(vz_start));
+    
+    if (expValue_x < 1) expValue_x = 1; if (expValue_y < 1) expValue_y = 1; if (expValue_z < 1) expValue_z = 1;
+    
+    println("vx_start = " + vx_start);
+    println("vx_end = " + vx_end);
+    println("expValue_x = " + expValue_x);
+    println("");
+    
+    for (int i = 1; i < numberOfRows; i++)
+    {
+      println("i = " + i);
+      println("vx_alt = " + velocityVectors.get(i)[0]);
+      println("minus_x = " + (vx_start * pow((float)expValue_x, (float)i)));
+      
+      float vx_neu, vy_neu, vz_neu;
+  
+      /* y = y - y0 * e_v^x */
+      float minus_x = vx_start * pow((float)expValue_x, (float)i);
+      if (minus_x > velocityVectors.get(i)[0]) vx_neu = 0;
+      else vx_neu = velocityVectors.get(i)[0] - minus_x;  
+      
+      float minus_y = vy_start * pow((float)expValue_y, (float)i);
+      if (abs(minus_y) > abs(velocityVectors.get(i)[1])) vy_neu = 0;
+      else vy_neu = velocityVectors.get(i)[1] - minus_y;  // y = y - y0 * e_v^x
+      
+      float minus_z = vz_start * pow((float)expValue_z, (float)i);
+      if (abs(minus_z) > abs(velocityVectors.get(i)[2])) vz_neu = 0;
+      else vz_neu = velocityVectors.get(i)[2] - minus_z;  // y = y - y0 * e_v^x
+          
+      float v[] = {vx_neu, vy_neu, vz_neu}; 
+      velocityVectors.set(i, v);
+      
+      println("vx_neu = " + velocityVectors.get(i)[0]);
+      println("");
+      
+  //    print(i + ":");
+  //    print("\t");
+  //    println(str(velocityVectors.get(i)));
+    }
+    
+    println("new vx_end = " + velocityVectors.get(numberOfRows-1)[0]);
   }
-
 /*------------------------------------------------------------------*/ 
+/*
 
+*/
 /*------------------------------------------------------------------*/   
   /* calculate trail vectors */
   println("calculate trail vectors");
@@ -300,15 +343,30 @@ void setup()
     float s[] = {sx_neu, sy_neu, sz_neu};
     trailVectors.add(i, s);
     
-    print(i + ":");
-    print("\t");
-    print(str(accelerationVectors.get(i)));
-    print("\t\t");
-    print(str(velocityVectors.get(i)));
-    print("\t\t");
-    println(str(trailVectors.get(i)));
+//    print(i + ":");
+//    print("\t");
+//    println(str(trailVectors.get(i)));
   }
 /*------------------------------------------------------------------*/ 
+
+///*------------------------------------------------------------------*/   
+//  /* show vectors */
+//  println("show vectors:"); print("id"); print("\t"); print("time"); print("\t"); print("acceleration vectors");
+//  print("\t\t\t\t"); print("velocity vectors"); print("\t\t\t\t"); println("trail vectors");
+//  
+//  for (int i = 0; i < numberOfRows; i++)
+//  { 
+//    print(i + ":");
+//    print("\t");
+//    print(str(data.get(i)[0]));
+//    print("\t");
+//    print(str(accelerationVectors.get(i)));
+//    print("\t\t");
+//    print(str(velocityVectors.get(i)));
+//    print("\t\t");
+//    println(str(trailVectors.get(i)));
+//  }
+///*------------------------------------------------------------------*/ 
 }
 
 
@@ -331,8 +389,8 @@ void draw()
 //    mY = mouseX;
 //  }
 //  
-//  ROTATEX(map(mX, 0, height, -PI, PI));
-//  ROTATEY(map(mY, 0, height, -PI, PI));
+//  rotateX(map(mX, 0, height, -PI, PI));
+//  rotateY(map(mY, 0, height, -PI, PI));
 //  
 //  draw2DAxes(X, 30);
 ///*------------------------------------------------------------------*/  
@@ -588,7 +646,7 @@ float[] rotateArrayVector(float vec[], float yzAngle, float xzAngle, float xyAng
   //println(str(accelerationVectors.get(i)));
 }
 
-double root(float b, float root)
-{
-    return Math.pow(Math.E, Math.log(b)/root);
+double root(float n, float root)
+{ 
+  return Math.pow(Math.E, Math.log(n)/root);
 } 
