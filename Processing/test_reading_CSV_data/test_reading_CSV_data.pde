@@ -8,7 +8,7 @@ int Y = 600;
 int REF_H = 400;
 int REF_B = 150;
 
-String FILENAME = "data/achti.csv";
+String FILENAME = "data/z_ufe.csv";
 
 int NUMBER_OF_SENSOR_DATA = 8;  // t, ax, ay, az, h, Gxy, Gxz, Gyz (in this order!)
 int NUMBER_OF_DATA_USED_TO_CALIBRATE = 150;  // that means 5sec calibrating!
@@ -20,6 +20,8 @@ boolean A_OFFSET = true;
 boolean G_OFFSET = false;
 boolean TRAPEZ = false;    // alternative integration
 boolean EXP_ERROR_CORRECTION = false;
+
+boolean SHOW = true;
 
 int ma = 10;
 int mv = 10;
@@ -289,11 +291,11 @@ void setup()
       else vx_neu = velocityVectors.get(i)[0] - minus_x;  
       
       float minus_y = vy_start * pow((float)expValue_y, (float)i);
-      if (abs(minus_y) > abs(velocityVectors.get(i)[1])) vy_neu = 0;
+      if (minus_y > velocityVectors.get(i)[1]) vy_neu = 0;
       else vy_neu = velocityVectors.get(i)[1] - minus_y;  // y = y - y0 * e_v^x
       
       float minus_z = vz_start * pow((float)expValue_z, (float)i);
-      if (abs(minus_z) > abs(velocityVectors.get(i)[2])) vz_neu = 0;
+      if (minus_z > velocityVectors.get(i)[2]) vz_neu = 0;
       else vz_neu = velocityVectors.get(i)[2] - minus_z;  // y = y - y0 * e_v^x
           
       float v[] = {vx_neu, vy_neu, vz_neu}; 
@@ -306,8 +308,6 @@ void setup()
   //    print("\t");
   //    println(str(velocityVectors.get(i)));
     }
-    
-    println("new vx_end = " + velocityVectors.get(numberOfRows-1)[0]);
   }
 /*------------------------------------------------------------------*/ 
 /*
@@ -349,24 +349,27 @@ void setup()
   }
 /*------------------------------------------------------------------*/ 
 
-///*------------------------------------------------------------------*/   
-//  /* show vectors */
-//  println("show vectors:"); print("id"); print("\t"); print("time"); print("\t"); print("acceleration vectors");
-//  print("\t\t\t\t"); print("velocity vectors"); print("\t\t\t\t"); println("trail vectors");
-//  
-//  for (int i = 0; i < numberOfRows; i++)
-//  { 
-//    print(i + ":");
-//    print("\t");
-//    print(str(data.get(i)[0]));
-//    print("\t");
-//    print(str(accelerationVectors.get(i)));
-//    print("\t\t");
-//    print(str(velocityVectors.get(i)));
-//    print("\t\t");
-//    println(str(trailVectors.get(i)));
-//  }
-///*------------------------------------------------------------------*/ 
+/*------------------------------------------------------------------*/   
+  /* show vectors */
+  if (SHOW)
+  {
+    println("show vectors:"); print("id"); print("\t"); print("time"); print("\t"); print("acceleration vectors");
+    print("\t\t\t\t"); print("velocity vectors"); print("\t\t\t\t"); println("trail vectors");
+    
+    for (int i = 0; i < numberOfRows; i++)
+    { 
+      print(i + ":");
+      print("\t");
+      print(str(data.get(i)[0]));
+      print("\t");
+      print(str(accelerationVectors.get(i)));
+      print("\t\t");
+      print(str(velocityVectors.get(i)));
+      print("\t\t");
+      println(str(trailVectors.get(i)));
+    }
+  }
+/*------------------------------------------------------------------*/ 
 }
 
 
