@@ -13,24 +13,27 @@ String FILENAME = "data/z.csv";
 int NUMBER_OF_SENSOR_DATA = 8;  // t, ax, ay, az, h, Gxy, Gxz, Gyz (in this order!)
 int NUMBER_OF_DATA_USED_TO_CALIBRATE = 150;  // that means 5sec calibrating!
 
+int MEAN = 3;
+
 boolean ROTATE = true;
 boolean G_ROTATION = true;
 boolean A_OFFSET = true;
 
-boolean G_OFFSET = false;
-boolean TRAPEZ = false;    // alternative integration
+boolean G_OFFSET = false;   // gyro offset
+boolean TRAPEZ = false;     // alternative integration
 
-int ma = 100;
-int mv = 100;
-int ms = 100;
+int ma = 10;
+int mv = 10;
+int ms = 10;
 
 /* global variables */
 int mX, mY;    // mouse coordinates
 int scaleFactor;
 float translateZ;
 
-int numberOfRows;
-ArrayList<float[]> data = new ArrayList();                // global generic array list
+int numberOfRowsData;
+int numberOfRowsVectors;
+ArrayList<float[]> data = new ArrayList();                 // global generic array list
 ArrayList<float[]> accelerationVectors = new ArrayList();  // global generic array list
 ArrayList<float[]> velocityVectors = new ArrayList();      // global generic array list
 ArrayList<float[]> trailVectors = new ArrayList();         // global generic array list
@@ -52,15 +55,16 @@ void setup()
   println("get data");
   String dataRows[] = loadStrings(FILENAME);
   
-  numberOfRows = dataRows.length;
-  //float data[][] = new float[numberOfRows][NUMBER_OF_SENSOR_DATA];
-  //float trailVectors[][] = new float[numberOfRows][3];
+  numberOfRowsData = dataRows.length;
+  numberOfRowsVectors = numberOfRowsData / MEAN;
+  //float data[][] = new float[numberOfRowsData][NUMBER_OF_SENSOR_DATA];
+  //float trailVectors[][] = new float[numberOfRowsData][3];
     
   /* print total number of rows */
   println(dataRows.length + " total data rows"); 
   
   /* convert string data to float arrays */
-  for (int i = 0; i < numberOfRows; i++)
+  for (int i = 0; i < numberOfRowsData; i++)
   {
     data.add(float(split(trim(dataRows[i]), ',')));  // extract and clean (trim and split) data rows
     //println(str(data.get(i)));
@@ -70,7 +74,7 @@ void setup()
 /*------------------------------------------------------------------*/ 
   /* convert unix timestamp (last 6 digits) to seconds */
   println("convert unix timestamp");
-  for (int i = 0; i < numberOfRows; i++)
+  for (int i = 0; i < numberOfRowsData; i++)
   {
     data.get(i)[0] /= 1000;
     println(str(data.get(i)));
@@ -82,7 +86,7 @@ void setup()
   if (ROTATE)
   {
     println("ROTATE data vectors");
-    for (int i = 0; i < numberOfRows; i++)
+    for (int i = 0; i < numberOfRowsData; i++)
     {
       /* collect current data */
       float a[] = {data.get(i)[1], data.get(i)[2], data.get(i)[3]};
@@ -147,7 +151,7 @@ void setup()
   if(g_heading != g_heading) { g_heading = 0; }
   println("g-roll: " + g_roll + ", " + "g-pitch: " + g_pitch + ", " + "g-heading: " + g_heading);
     
-  for (int i = 0; i < numberOfRows; i++)
+  for (int i = 0; i < numberOfRowsData; i++)
   {
     /* recalculate data values */
     if (A_OFFSET)
@@ -195,27 +199,44 @@ void setup()
 /*------------------------------------------------------------------*/ 
   /* set acceleration vectors */
   println("set acceleration vectors");
-  for (int i = 0; i < numberOfRows; i++)
-  {  
-    float a[] = {data.get(i)[1], data.get(i)[2], data.get(i)[3]};
-    accelerationVectors.add(i, a);
+  float ax = 0;
+  float ay = 0;
+  float az = 0;
+  float ax_mean, ay_mean, az_mean;
+  for (int i = 0; i < numberOfRowsData; i++)
+  { 
+    ax += data.get(i)[1];
+    ay += data.get(i)[2];
+    az += data.get(i)[3];
+    
+    if (i%MEAN == 0)
+    {
+      ax_mean = ax / MEAN;
+      ay_mean = ay / MEAN;
+      az_mean = az / MEAN;
+      
+      float a[] = {ax_mean, ay_mean, az_mean};
+      accelerationVectors.add(i/MEAN, a);
+    }
   }
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/   
-  /* calculate velocity vectors */
-  println("calculate velocity vectors");
+  /* calculate velocity and trail vectors */
+  println("calculate velocity and trail vectors");
   float zeros[] = {0, 0, 0};
   velocityVectors.add(0, zeros);  // init first position with zeros
+  trailVectors.add(0, zeros);     // init first position with zeros 
   
-  for (int i = 1; i < numberOfRows; i++)
+  for (int i = 1; i < numberOfRowsVectors; i++)
   {
     /* get delta t */
-    float dt = data.get(i)[0] - data.get(i-1)[0];
+    int j = i/MEAN + 1;
+    float dt = data.get(j)[0] - data.get(j-1)[0];
     //println(dt);
    
-   float[] delta_winkel = { data.get(i)[7] - data.get(i-1)[7], data.get(i)[6] - data.get(i-1)[6], data.get(i)[5] - data.get(i-1)[5] };  //blup
-   float[] v_alt_ungedreht = {velocityVectors.get(i-1)[0], velocityVectors.get(i-1)[1], velocityVectors.get(i-1)[2]};  //blup
+   float[] delta_winkel = { data.get(i)[7] - data.get(i-1)[7], data.get(i)[6] - data.get(i-1)[6], data.get(i)[5] - data.get(i-1)[5] };
+   float[] v_alt_ungedreht = {velocityVectors.get(i-1)[0], velocityVectors.get(i-1)[1], velocityVectors.get(i-1)[2]};
    float[] v_alt_gedreht = v_alt_ungedreht;//rotateArrayVector(v_alt_ungedreht, delta_winkel[0], delta_winkel[1], delta_winkel[2]);
    
 //   print(str(delta_winkel));
@@ -244,43 +265,14 @@ void setup()
     
     float v[] = {vx_neu, vy_neu, vz_neu}; 
     velocityVectors.add(i, v);
-  }
-/*------------------------------------------------------------------*/ 
-
-/*------------------------------------------------------------------*/ 
-  /* velocity exponential error correction */
-  println("velocity exponential error correction");
-  float vx_start = velocityVectors.get(0)[0];
-  float vy_start = velocityVectors.get(0)[1];
-  float vz_start = velocityVectors.get(0)[2];
-  float vx_end = velocityVectors.get(numberOfRows-1)[0];
-  float vy_end = velocityVectors.get(numberOfRows-1)[1];
-  float vz_end = velocityVectors.get(numberOfRows-1)[2];
-  
-  double expValue_x = root(numberOfRows, vx_end/vx_start);
-  double expValue_y = root(numberOfRows, vy_end/vy_start);
-  double expValue_z = root(numberOfRows, vz_end/vz_start);
-  
-  for (int i = 1; i < numberOfRows; i++)
-  {
-    vx_neu -= vx_start * expValue_x^i;
-    vy_neu -= 
-    vz_neu -= 
-  }
-
-/*------------------------------------------------------------------*/ 
-
-/*------------------------------------------------------------------*/   
-  /* calculate trail vectors */
-  println("calculate trail vectors");
-  trailVectors.add(0, zeros);     // init first position with zeros 
-  
-  for (int i = 1; i < numberOfRows; i++)
-  {
-    /* get delta t */
-    float dt = data.get(i)[0] - data.get(i-1)[0];
-    //println(dt);
-          
+    
+    print(i + ":");
+    print("\t");
+    print(str(accelerationVectors.get(i)));
+    print("\t\t");
+    print(str(velocityVectors.get(i)));
+    print("\t\t");
+      
     float sx_neu, sy_neu, sz_neu;
     if (TRAPEZ)
     {
@@ -300,18 +292,12 @@ void setup()
     float s[] = {sx_neu, sy_neu, sz_neu};
     trailVectors.add(i, s);
     
-    print(i + ":");
-    print("\t");
-    print(str(accelerationVectors.get(i)));
-    print("\t\t");
-    print(str(velocityVectors.get(i)));
-    print("\t\t");
     println(str(trailVectors.get(i)));
   }
+  
+
 /*------------------------------------------------------------------*/ 
 }
-
-
 
 /* loop */
 void draw()
@@ -345,7 +331,7 @@ void draw()
 //
 //  float t_alt = 0;
 //  float var_alt = 0;
-//  for (int i = 1; i < numberOfRows; i++)
+//  for (int i = 1; i < numberOfRowsData; i++)
 //  {
 //    float t_neu = t_alt + (data.get(i)[0] - data.get(i-1)[0]) * m;
 //    
@@ -429,9 +415,9 @@ void draw()
 
 ///*------------------------------------------------------------------*/  
 //  /* draw acceleration vectors */
-//  for (int i = 1; i < numberOfRows; i++)
+//  for (int i = 1; i < numberOfRowsVectors; i++)
 //  {
-//    stroke(int(i * (255.0 / numberOfRows)), int(i * (255.0 / numberOfRows)), int(i * (255.0 / numberOfRows)));
+//    stroke(int(i * (255.0 / numberOfRowsData)), int(i * (255.0 / numberOfRowsData)), int(i * (255.0 / numberOfRowsData)));
 //    float last_dsx = accelerationVectors.get(i-1)[0] * ma;
 //    float last_dsy = accelerationVectors.get(i-1)[1] * ma;
 //    float last_dsz = accelerationVectors.get(i-1)[2] * ma;
@@ -457,9 +443,9 @@ void draw()
 
 /*------------------------------------------------------------------*/  
   /* draw velocity vectors */
-  for (int i = 1; i < numberOfRows; i++)
+  for (int i = 1; i < numberOfRowsVectors; i++)
   {
-    stroke(255, 50, int(i * (255.0 / numberOfRows)));
+    stroke(255, 50, int(i * (255.0 / numberOfRowsData)));
     float last_dsx = velocityVectors.get(i-1)[0] * mv;
     float last_dsy = velocityVectors.get(i-1)[1] * mv;
     float last_dsz = velocityVectors.get(i-1)[2] * mv;
@@ -485,9 +471,9 @@ void draw()
 
 /*------------------------------------------------------------------*/  
   /* draw trail vectors */
-  for (int i = 1; i < numberOfRows; i++)
+  for (int i = 1; i < numberOfRowsVectors; i++)
   {
-    stroke(0, 255, int(i * (255.0 / numberOfRows)));
+    stroke(0, 255, int(i * (255.0 / numberOfRowsData)));
     float last_dsx = trailVectors.get(i-1)[0] * ms;
     float last_dsy = trailVectors.get(i-1)[1] * ms;
     float last_dsz = trailVectors.get(i-1)[2] * ms;
@@ -588,7 +574,4 @@ float[] rotateArrayVector(float vec[], float yzAngle, float xzAngle, float xyAng
   //println(str(accelerationVectors.get(i)));
 }
 
-double root(float b, float root)
-{
-    return Math.pow(Math.E, Math.log(b)/root);
-} 
+
