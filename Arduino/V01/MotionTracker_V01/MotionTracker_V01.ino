@@ -20,8 +20,7 @@
 #define MAX_DURATION_SHORTCLICK       1000    // max. duration in ms a SHORTCLICK will be recognized
 #define MIN_DURATION_LONGCLICK        2000    // min. duration in ms a LONGCLICK will be recognized
 
-/* debugging */
-#define DEBUGGING                     true    // (must be commented!) 
+/* communication */
 #define BAUDRATE                    115200    // e.g. 9600 or 19200 or 57600 or 115200
 #define KNOCK_DELAY		       200    // delay between knocks
 #define HANDSHAKE_MESSAGE        ("knock")    // handshacke key
@@ -29,10 +28,13 @@
 /* sensor defines */
 #define NUMBER_OF_DIFFERENT_DATA        11    // t, ax, ay, az, Bx, By, Bz, wx, wy, wz, T (in this order!)
 #define MEAN                            10    // number of data to summarize before saving
-//#define MEDIAN                        true    // comment out to use MEAN calculation
+//#define MEDIAN                        true    // comment out to use MEAN calculation -> uses a lot mor RAM!
 
 /* timer interrupt */               // 78 -> 10ms, 117 -> 15ms, 156 -> 20ms
 #define INTERRUPT_FREQUENCY_DIVISOR_1  156//117//78    // t_isr = 1/(8000000/(prescaler*VALUE))
+
+/* debugging */
+#define DEBUGGING                     true    // (must be commented!) 
 
 /* Includes --------------------------------------------------- */
 #include <avr/sleep.h>
@@ -135,30 +137,30 @@
 #define getBit(reg, b) (_SFR_BYTE(reg) & _BV(b))
 #endif
 
-/* State machine ---------------------------------------------- */
-/* states */
-#define OFF              0
-#define RDY              1
-#define READ             2
-#define FULL             3
-#define WRITE            4
-
-/* events */
-#define NO_EVENT         0
-#define SHORTCLICK       1
-#define LONGCLICK        2
-#define DOUBLECLICK      3
-#define MEMORY_FULL      4
+///* State machine ---------------------------------------------- */
+///* states */
+//#define OFF              0
+//#define RDY              1
+//#define READ             2
+//#define FULL             3
+//#define WRITE            4
+//
+///* events */
+//#define NO_EVENT         0
+//#define SHORTCLICK       1
+//#define LONGCLICK        2
+//#define DOUBLECLICK      3
+//#define MEMORY_FULL      4
 
 /* General defines -------------------------------------------- */
 #define FOREVER      true
 #define UP           true
 #define DOWN         false
 
-/* Global variables ------------------------------------------- */
-/* default state machine */
-byte state = OFF;  // first state
-byte event = NO_EVENT;
+///* Global variables ------------------------------------------- */
+///* default state machine */
+//byte state = OFF;  // first state
+//byte event = NO_EVENT;
 
 /* timing reference variables */
 //unsigned long startMillis = millis();
@@ -177,10 +179,10 @@ volatile unsigned int timerInterruptCounter = 0;
 
 /* sensor data array */
 #ifdef MEDIAN
-float dataArray2D[MEAN][NUMBER_OF_DIFFERENT_DATA];  //blup: RAM problem?
+float dataArray2D[NUMBER_OF_DIFFERENT_DATA][MEAN];  // 440 bytes
 #endif
 #ifndef MEDIAN
-float dataArray[NUMBER_OF_DIFFERENT_DATA];
+float dataArray[NUMBER_OF_DIFFERENT_DATA];  // 44 bytes
 #endif
 byte meanCntr = 0;
 
@@ -225,7 +227,7 @@ void setup()
   pinMode(RED, OUTPUT);
   pinMode(BLUE, OUTPUT);
   pinMode(GREEN, OUTPUT);
-  digitalWrite(RED, HIGH);		// turn off LED
+  digitalWrite(RED, HIGH);	// turn off LED
   digitalWrite(BLUE, HIGH); 	// turn off LED
   digitalWrite(GREEN, HIGH);	// turn off LED
   
@@ -294,19 +296,19 @@ void loop()
   us_ref = micros();                     // set new timing reference
   
   /* collect data */
-  #ifdef MEDIAN
+  #ifdef MEDIAN  // use median
   {
-    dataArray2D[meanCntr][0]  = dt;
-    dataArray2D[meanCntr][1]  = accel.acceleration.x;
-    dataArray2D[meanCntr][2]  = accel.acceleration.y;
-    dataArray2D[meanCntr][3]  = accel.acceleration.z;
-    dataArray2D[meanCntr][4]  = mag.magnetic.x;
-    dataArray2D[meanCntr][5]  = mag.magnetic.y;
-    dataArray2D[meanCntr][6]  = mag.magnetic.z;
-    dataArray2D[meanCntr][7]  = gyro.gyro.x;
-    dataArray2D[meanCntr][8]  = gyro.gyro.y;
-    dataArray2D[meanCntr][9]  = gyro.gyro.z;
-    dataArray2D[meanCntr][10] = temp.temperature;
+    dataArray2D[0][meanCntr]  = dt;
+    dataArray2D[1][meanCntr]  = accel.acceleration.x;
+    dataArray2D[2][meanCntr]  = accel.acceleration.y;
+    dataArray2D[3][meanCntr]  = accel.acceleration.z;
+    dataArray2D[4][meanCntr]  = mag.magnetic.x;
+    dataArray2D[5][meanCntr]  = mag.magnetic.y;
+    dataArray2D[6][meanCntr]  = mag.magnetic.z;
+    dataArray2D[7][meanCntr]  = gyro.gyro.x;
+    dataArray2D[8][meanCntr]  = gyro.gyro.y;
+    dataArray2D[9][meanCntr]  = gyro.gyro.z;
+    dataArray2D[10][meanCntr] = temp.temperature;
     
     meanCntr++;
     
@@ -314,36 +316,36 @@ void loop()
     {
       meanCntr = 0;
       
-      /* get MEDIAN */
-      for (byte i = 0; i < MEAN; i++) qsort(dataArray2D[i], MEAN, sizeof(float), cmpfunc);
+      /* sort arrays */
+      for (byte i = 1; i < NUMBER_OF_DIFFERENT_DATA; i++) qsort(dataArray2D[i], MEAN, sizeof(float), cmpfunc);
   
       /* print timestamp in us */
       Serial.print(micros()); Serial.print(", ");                      // t
   
       /* print delta time in us */
-      Serial.print(dataArray2D[MEAN/2][0] * MEAN); Serial.print(", "); // dt
+      Serial.print(dataArray2D[0][MEAN-1]); Serial.print(", ");        // dt
           
       /* print acceleration data in m/s^2 */
-      Serial.print(dataArray2D[MEAN/2][1]); Serial.print(", ");        // ax
-      Serial.print(dataArray2D[MEAN/2][2]); Serial.print(", ");        // ay
-      Serial.print(dataArray2D[MEAN/2][3]); Serial.print(", ");        // az
+      Serial.print(dataArray2D[1][MEAN/2]); Serial.print(", ");        // ax
+      Serial.print(dataArray2D[2][MEAN/2]); Serial.print(", ");        // ay
+      Serial.print(dataArray2D[3][MEAN/2]); Serial.print(", ");        // az
       
       /* print magnetometer data in Gs */
-      Serial.print(dataArray2D[MEAN/2][4]); Serial.print(", ");        // Bx
-      Serial.print(dataArray2D[MEAN/2][5]); Serial.print(", ");        // By
-      Serial.print(dataArray2D[MEAN/2][6]); Serial.print(", ");        // Bz
+      Serial.print(dataArray2D[4][MEAN/2]); Serial.print(", ");        // Bx
+      Serial.print(dataArray2D[5][MEAN/2]); Serial.print(", ");        // By
+      Serial.print(dataArray2D[6][MEAN/2]); Serial.print(", ");        // Bz
       
       /* print gyroscop data in °/s */
-      Serial.print(dataArray2D[MEAN/2][7]); Serial.print(", ");        // wx
-      Serial.print(dataArray2D[MEAN/2][8]); Serial.print(", ");        // wy
-      Serial.print(dataArray2D[MEAN/2][9]); Serial.print(", ");        // wz
+      Serial.print(dataArray2D[7][MEAN/2]); Serial.print(", ");        // wx
+      Serial.print(dataArray2D[8][MEAN/2]); Serial.print(", ");        // wy
+      Serial.print(dataArray2D[9][MEAN/2]); Serial.print(", ");        // wz
       
       /* print temp data in °C */
-      Serial.println(dataArray2D[MEAN/2][10]);                         // T
+      Serial.println(dataArray2D[10][MEAN/2]);                         // T
     }
   }
   #endif
-  #ifndef MEDIAN
+  #ifndef MEDIAN  // use mean
   {
     dataArray[0]  += dt;
     dataArray[1]  += accel.acceleration.x;
@@ -366,8 +368,8 @@ void loop()
       /* divide data by MEAN */
       for (byte i = 0; i < NUMBER_OF_DIFFERENT_DATA; i++) dataArray[i] /= MEAN;
   
-      /* print timestamp in us */
-      Serial.print(micros()); Serial.print(", ");            // t
+//      /* print timestamp in us */
+//      Serial.print(micros()); Serial.print(", ");            // t
   
       /* print delta time in us */
       Serial.print(dataArray[0] * MEAN); Serial.print(", "); // dt
@@ -395,6 +397,11 @@ void loop()
     }
   }
   #endif
+  
+  
+
+  
+  
   
   
   
