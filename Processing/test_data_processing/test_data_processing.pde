@@ -8,30 +8,31 @@ int Y = 600;
 int REF_H = 400;
 int REF_B = 150;
 
-int NUMBER_OF_SENSOR_DATA = 11;  // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz (in this order!)
+int NUMBER_OF_SENSOR_DATA = 11;  // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T (in this order!)
 //float GRAVITY = 9.81;
 
 float FILTER_CONSTANT = 0.5;
-float ACCEL_THRESHOLD = 0.5;  // threshold in m/s^2 to observe before integrating the acceleration
+float ACCEL_THRESHOLD = 0.5;  // threshold in m/s^2 to observe before integrating the accelerations
 
 /* communication */
 int BAUDRATE = 112600;
 int SERIAL_PORT = 5;
 boolean firstContact = false;
-String s = "knock";
+String s = "knock";  // handshacke key
 
-//boolean ROTATE = true;                      // rotate data to fit them to the room coordinate system
-//boolean G_ROTATION = true;                  // rotate by the g-error
-boolean REMOVE_OFFSETS = true;               // remove calibrations
-//boolean EXP_ERROR_CORRECTION = true;        // remove exponential errors
-//boolean TRAPEZ = false;                     // alternative integration calculation
-//
-//boolean SHOW_RAW_DATA = false;              // shows raw data
-//boolean SHOW_ROTATED_DATA = false;          // shows data after the rotations
-boolean SHOW_CALIBRATION = true;                 // shows calibration data
+/* switches */
+boolean CHANGING_FILTER_CONSTANT = false;   // recalculate filter constant on base of current gyro magnitude
+boolean USE_MAGNETOMETER = false;           // uses the magnetometer to calculate the heading instead of the acceleration vector
+boolean ROTATE = true;                      // rotate data to fit them to the room coordinate system
+boolean REMOVE_G_VECTOR = true;             // remove g-vector
+boolean REMOVE_ORIENTATION_OFFSET = true;   // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
+//boolean EXP_ERROR_CORRECTION = true;        // remove exponential velocity errors
+
+boolean SHOW_RAW_DATA = true;               // shows raw data 
+boolean SHOW_FILTERED_ORIENTATION = true;   // shows the orientation before removing the orientation offset
 //boolean SHOW_EXP_ERROR_CORRECTION = false;  // shows velocity vectors after the exponential error corrections
-boolean SHOW_VECTORS = true;                // shows id, time, acceleration-, velocity- and trail-vectors
-//
+boolean SHOW_VECTORS = true;                // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
+
 ///* drawing multiplicators */
 //int ma = 10;
 //int mv = 10;
@@ -45,12 +46,13 @@ float translateZ;
 Serial myPort;
 
 ArrayList<float[]> data = new ArrayList();                // global generic array list
-ArrayList<float[]> calibrations = new ArrayList();             // global generic array list
+ArrayList<float[]> calibrations = new ArrayList();        // global generic array list
 ArrayList<float[]> orientationVector = new ArrayList();   // global generic array list
 ArrayList<float[]> accelerationVector = new ArrayList();  // global generic array list
 ArrayList<float[]> velocityVector = new ArrayList();      // global generic array list
 ArrayList<float[]> trailVector = new ArrayList();         // global generic array list
 
+/* calibration variables */
 boolean calibrationFlag = true;
 int NUMBER_OF_DATA_TO_CALIBRATE = 50;
 int cCnt = 0;  // calibration counter
@@ -97,14 +99,14 @@ void draw()
 
 void serialEvent( Serial myPort)
 {
-  /* put the incoming data into a String - */
+  /* put the incoming data into a string */
   String stringVal = myPort.readStringUntil('\n');  //the '\n' is our end delimiter indicating the end of a complete packet
   
   /* make sure our data isn't empty before continuing */
   if (stringVal != null)
   {
     /* trim whitespace and formatting characters (like carriage return) */
-    stringVal = trim(stringVal);  //blup zwingend nötig für Erkennung von "knock"
+    stringVal = trim(stringVal);  // necessary to realize the handshacke key
     //println(stringVal);
       
     if (firstContact == false)
@@ -112,15 +114,16 @@ void serialEvent( Serial myPort)
       /* look for our "knock" string to start the handshake */
       if (stringVal.equals(s))
       {
-        /* if it's there, clear the buffer, and send a request for data */
+        /* if it's there, clear the buffer and send a request for data */
         myPort.clear();
         firstContact = true;
-        myPort.write("let's go!");
+        myPort.write("let's go!");  // data request
         println("contact established!");
       }
     }
     else
-    { //if we've already established contact, keep getting and parsing data
+    { 
+      /* if we've already established contact, keep getting and parsing data */
       float da[] = (float(split(stringVal, ',')));  //parses the packet and places the stringValues into the data array
       
       /* check if data is a number */
@@ -128,12 +131,12 @@ void serialEvent( Serial myPort)
       {
         /* set data vector */
         data.set(0, da);    
-        println(str(data.get(0)));
+        if (SHOW_RAW_DATA) println(str(data.get(0)));
         
         /* check calibration flag */
         if (calibrationFlag)
         {
-          /* collect first few data */
+          /* collect first few data for calibration */
           if (cCnt < NUMBER_OF_DATA_TO_CALIBRATE)
           {
             println("collect calibration data: ");
@@ -150,8 +153,8 @@ void serialEvent( Serial myPort)
             float wy_c = 0;
             float wz_c = 0;
             
-            /* get mean values (calibrations) */
-            for (int i = 1; i <= NUMBER_OF_DATA_TO_CALIBRATE; i++)
+            /* get mean values (calibration) */
+            for (int i = 0; i <= NUMBER_OF_DATA_TO_CALIBRATE; i++)
             {
               dt_c += data.get(i)[0];
               ax_c += data.get(i)[1]; ay_c += data.get(i)[2]; az_c += data.get(i)[3];
@@ -172,9 +175,16 @@ void serialEvent( Serial myPort)
             /* get calibration orientations */
             float o_g_c[] = getOrientationGyro(dt_c, wx_c, wy_c, wz_c);
             float o_a_c[] = getOrientationAccel(ax_c, ay_c, az_c);
-            
+                  
             /* fuse calibration orientations */
             float o_c[] = fuseOrientations(FILTER_CONSTANT, o_g_c, o_a_c);
+            
+            /* replace calculated heading with the more accurate one from the magnetometer if enabled */
+            if (USE_MAGNETOMETER)
+            {
+              o_a_c[2] = getHeading_m(o_c[0], o_c[1]);  // (roll, pitch)
+              o_c = fuseOrientations(FILTER_CONSTANT, o_g_c, o_a_c);
+            }
                         
             /* set global offset vectors */
             calibrations.set(0, a_c);  // accelerations
@@ -205,24 +215,58 @@ void serialEvent( Serial myPort)
           
           /* fuse orientations */
           float o[] = fuseOrientations(FILTER_CONSTANT, o_g, o_a);
-                    
+          
+          /* replace calculated heading with the more accurate one from the magnetometer if enabled */
+          if (USE_MAGNETOMETER)
+          {
+            o_a[2] = getHeading_m(o[0], o[1]);  // (roll, pitch)
+            o = fuseOrientations(FILTER_CONSTANT, o_g, o_a);
+          }
+          
+          if (SHOW_FILTERED_ORIENTATION) println("roll = " + o[0]*180/PI + " pitch = " + o[1]*180/PI + " heading = " + o[2]*180/PI);
+          
+//          /* remove orientation offsets */
+//          if (REMOVE_ORIENTATION_OFFSET)  // ATTENTION: only allowed when calibrated on a plane ground!
+//          {
+//            o[0] -= calibrations.get(1)[0];
+//            o[1] -= calibrations.get(1)[1];
+//            o[2] -= calibrations.get(1)[2];
+//            
+//            println("orientation-offset = " + calibrations.get(1)[0]*180/PI + ", " + calibrations.get(1)[1]*180/PI + ", " + calibrations.get(1)[2]*180/PI);
+//          }  
+          
           /* update global orientation vector */
           orientationVector.set(0, o);
-                    
-          /* rotate acceleration vector to fit them to the room coordinate system */
-          float a[] = {ax, ay, az};
-          a = rotateArrayVector(a, o[0], o[1], o[2]);  // (a, roll, pitch, heading)
           
           /* remove g offset */
-          float g[] = getGravityVector(o[0], o[1]);  // (roll, pitch)
-          a[0] -= g[0];
-          a[1] -= g[1];
-          a[2] -= g[2];
+          if (REMOVE_G_VECTOR)
+          {
+            float g[] = getGravityVector(o[0], o[1]);  // (roll, pitch)
+            a[0] -= g[0];
+            a[1] -= g[1];
+            a[2] -= g[2];
+            
+            println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
+          }
           
-          println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
-          
+          float a[] = {ax, ay, az};          
+          /* rotate acceleration vector to fit them to the room coordinate system */
+          if (ROTATE) a = rotateArrayVector(a, o[0], o[1], o[2]);  // (a, roll, pitch, heading)
+
+
           /* update global acceleration vector */
           accelerationVector.set(0, a);
+          
+          /* remove orientation offsets */
+          if (REMOVE_ORIENTATION_OFFSET)  // ATTENTION: only allowed when calibrated on a plane ground!
+          {
+            o[0] -= calibrations.get(1)[0];
+            o[1] -= calibrations.get(1)[1];
+            o[2] -= calibrations.get(1)[2];
+            orientationVector.set(0, o);
+            
+            println("orientation-offset = " + calibrations.get(1)[0]*180/PI + ", " + calibrations.get(1)[1]*180/PI + ", " + calibrations.get(1)[2]*180/PI);
+          }          
           
           /* get velocity vecotr */
           float v[] = getVelocityVector(dt);
@@ -261,7 +305,7 @@ float[] getOrientationAccel(float ax, float ay, float az)
 {
   float roll_a    = atan2(ay, sqrt(ax*ax + az*az));  // get roll (yz-axis rotation) out of the acceleration values
   float pitch_a   = atan2(ax, sqrt(ay*ay + az*az));  // get pitch (xz-axis rotation) out of the acceleration values
-  float heading_a = getHeading_a(roll_a, pitch_a);
+  float heading_a = getHeading_a();
   //println("roll_a = " + roll_a*180/PI + " pitch_a = " + pitch_a*180/PI + " heading_a = " + heading_a*180/PI);
   
   float o_a[] = {roll_a, pitch_a, heading_a};
@@ -271,14 +315,19 @@ float[] getOrientationAccel(float ax, float ay, float az)
 
 /*------------------------------------------------------------------*/
 /* fuse orientations: complementary filter */
-float[] fuseOrientations(float fc, float[] g, float[] a)  // the bigger fc the better the result but slower the system!
+float[] fuseOrientations(float fc, float g[], float a[])  // the bigger fc the better the result but slower the system!
 {
-//        float w_magnitude = sqrt(data.get(0)[7]*data.get(0)[7] + data.get(0)[8]*data.get(0)[8] + data.get(0)[9]*data.get(0)[9]);
-//        float fc = constrain(mapFloat(abs(w_magnitude), 0, 300, 0, 1), 0, 1);  // calculate fc on base of gyro magnitude, map and limit it to 0... 1
+  /* calculate fc on base of current gyro magnitude if enabled */
+  if (CHANGING_FILTER_CONSTANT)
+  {
+    float w_magnitude = sqrt(sq(data.get(0)[7]) + sq(data.get(0)[8]) + sq(data.get(0)[9]));
+    fc = constrain(mapFloat(abs(w_magnitude), 0, 300, 0, 1), 0, 1);  // map and limit gyro magnitude to 0... 1
+  }
+
   float roll    = fc * g[0] + (1 - fc) * a[0];
   float pitch   = fc * g[1] + (1 - fc) * a[1];
   float heading = fc * g[2] + (1 - fc) * a[2];
-  println("roll = " + roll*180/PI + " pitch = " + pitch*180/PI + " heading = " + heading*180/PI);
+  //println("roll = " + roll*180/PI + " pitch = " + pitch*180/PI + " heading = " + heading*180/PI);
   
   /* update orientation vector */
   float o[] = {roll, pitch, heading};
@@ -290,13 +339,6 @@ float[] fuseOrientations(float fc, float[] g, float[] a)  // the bigger fc the b
 /* get tilt compensated heading (xy-axis rotation) out of the magnetometer values */
 float getHeading_m(float roll, float pitch)
 {
-  float headX, headY;
-  
-  float cos_roll = cos(roll);
-  float sin_roll = 1  - (cos_roll * cos_roll);
-  float cos_pitch = cos(pitch);
-  float sin_pitch = 1  - (cos_pitch * cos_pitch);
-  
   float Bx = data.get(0)[4];
   float By = data.get(0)[5];
   float Bz = data.get(0)[6];
@@ -308,9 +350,10 @@ float getHeading_m(float roll, float pitch)
   Bz /= B_amount;
   
   /* magnetic heading */
-  headX = Bx*cos_pitch + By*sin_roll*sin_pitch + Bz*cos_roll*sin_pitch;  // tilt compensated magnetic field X component
-  headY = By*cos_roll - Bz*sin_roll;                                     // tilt compensated magnetic field Y component
+  float headX = Bx*cos(pitch) + By*sin(roll)*sin(pitch) + Bz*cos(roll)*sin(pitch);  // tilt compensated magnetic field X component
+  float headY = By*cos(roll) - Bz*sin(roll);                                     // tilt compensated magnetic field Y component
   float heading = atan2(-headY, headX);
+  if (heading < 0) heading += 2*PI;
 
 //  /* declination correction (if supplied) */
 //  if( fabs(_declination) > 0.0 )
@@ -323,7 +366,9 @@ float getHeading_m(float roll, float pitch)
   return heading;  // in rad
 }  
 /*------------------------------------------------------------------*/ 
-/*//normalize the magnetic vector
+
+/* EXAMPLE:
+//normalize the magnetic vector
 norm= sqrt( sq(xMagnetMap) + sq(yMagnetMap) + sq(zMagnetMap));
 xMagnetMap /=norm;
 yMagnetMap /=norm;
@@ -344,50 +389,30 @@ YawU=atan2(-yMagnetMap, xMagnetMap) *180/PI;
  */
 
 /*------------------------------------------------------------------*/ 
-/* get tilt compensated heading (xy-axis rotation) out of the acceleration values (alternative worse variant) */
-float getHeading_a(float roll, float pitch)
-{
-  float headX, headY;
-  
-  float cos_roll = cos(roll);
-  float sin_roll = 1  - (cos_roll * cos_roll);
-  float cos_pitch = cos(pitch);
-  float sin_pitch = 1  - (cos_pitch * cos_pitch);
-  
+/* get heading (xy-axis rotation) out of the acceleration values (alternative worse variant) */
+float getHeading_a()
+{ 
   float ax = data.get(0)[1];
   float ay = data.get(0)[2];
   float az = data.get(0)[3];
   
-  /* normalize acceleration values */
-  float a_amount = sqrt(ax*ax + ay*ay + az*az);
-  ax /= a_amount;
-  ay /= a_amount;
-  az /= a_amount;
+  float heading_a = atan2(ay, ax);
+  if (heading_a < 0) heading_a += 2*PI;
   
-  /* heading */
-  headX = ax*cos_pitch + ay*sin_roll*sin_pitch + az*cos_roll*sin_pitch;  // tilt compensated X component
-  headY = ay*cos_roll - az*sin_roll;                                     // tilt compensated Y component
-  float heading = atan2(-headY, headX);
-  
-  /* declination correction (if supplied) */
-//  if(abs(_declination) > 0.0)
-//  {
-//      heading = heading + _declination;
-//      if (heading > M_PI) heading -= (2.0 * PI);  // angle normalization (-180 deg, 180 deg)
-//      else if (heading < -M_PI) heading += (2.0 * PI);
-//  }
-  
-  return heading;  // in rad
+  return heading_a;  // in rad
 }
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/ 
 float[] getGravityVector(float roll, float pitch)
 {
-  float gravity = sqrt(pow(calibrations.get(0)[0], 2) + pow(calibrations.get(0)[1], 2) + pow(calibrations.get(0)[2], 2));
+  float gravity = sqrt(sq(calibrations.get(0)[0]) + sq(calibrations.get(0)[1]) + sq(calibrations.get(0)[2]));
   float gx = gravity * sin(pitch);
   float gy = gravity * cos(pitch) * sin(roll);
-  float gz = gravity * cos(pitch) * cos(roll);
+  float gz;
+  = -gravity * cos(pitch) * cos(roll);
+  
+  println("g = " + gravity);
   
   float g[] = {gx, gy, gz};
   return g;
@@ -395,7 +420,7 @@ float[] getGravityVector(float roll, float pitch)
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/ 
-int vCnt = 0;
+int vCnt = 0;  // global counter
 
 /* integrate acceleration vector to get the velocity vector */
 float[] getVelocityVector(float dt)
@@ -408,7 +433,7 @@ float[] getVelocityVector(float dt)
   float vy = velocityVector.get(0)[1];
   float vz = velocityVector.get(0)[2];
   
-  /* take a threshold into account befor integrating */
+  /* take a threshold into account before integrating */
   if (abs(ax) > ACCEL_THRESHOLD)
   {
     vx += ax * dt;
@@ -449,6 +474,7 @@ float[] getTrailVector(float dt)
   float sx = trailVector.get(0)[0] + velocityVector.get(0)[0] * dt;
   float sy = trailVector.get(0)[1] + velocityVector.get(0)[1] * dt;
   float sz = trailVector.get(0)[2] + velocityVector.get(0)[2] * dt;
+  
   float s[] = {sx, sy, sz}; 
   return s;
 }
@@ -560,13 +586,13 @@ void draw3DAxes(int l, int textOffset)
   
   stroke(0, 255, 0);  // green
   line(0, -l, 0, 0, l, 0);
-  text("+y", 0, tl, 0);
-  text("-y", 0, -l, 0);
+  text("-z", 0, tl, 0);
+  text("+z", 0, -l, 0);
   
   stroke(0, 0, 255);  //blue
   line(0, 0, -l, 0, 0, l);
-  text("+z", 0, 0, tl);
-  text("-z", 0, 0, -l);
+  text("+y", 0, 0, tl);
+  text("-y", 0, 0, -l);
 }
 /*------------------------------------------------------------------*/
 
@@ -663,37 +689,32 @@ void draw3DAxes(int l, int textOffset)
 /*------------------------------------------------------------------*/
 void drawFloatingObject()
 {
-  float roll    = orientationVector.get(0)[0];
+  float roll    = orientationVector.get(0)[0] + PI/2;
   float pitch   = orientationVector.get(0)[1];
   float heading = orientationVector.get(0)[2];
     
   rotateX(roll);
   rotateY(pitch);
-  rotateZ(heading);
+  //rotateZ(heading);
   
   fill(0, 255, 100);  // set the disc fill color
-  ellipse(0, 0, width/2, width/2);  // draw the disc
+  ellipse(0, 0, width/2, width/3);  // draw the disc
   
   fill(255, 255, 255);  // set the text fill color
-  text(roll*180/PI + "," + pitch*180/PI, -40, 10, 1);  // Draw some text so you can tell front from back
+  text("roll = " + round((roll-PI/2)*180/PI) + ", pitch = " + round(pitch*180/PI), -82, 10, 1);  // Draw some text so you can tell front from back
   //line(0, 0, 0, width/4*sin(roll + PI/2), width/4*cos(pitch), 0);
 }
 /*------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------*/
-float[] rotateArrayVector(float vec[], float yzAngle, float xzAngle, float xyAngle)
+float[] rotateArrayVector(float vec[], float roll, float pitch, float heading)
 {
   /* collect current data */
   float x = vec[0];
   float y = vec[1];
   float z = vec[2];
   float x_new1, y_new1, z_new1, x_new2, y_new2, z_new2;
-  float roll = yzAngle * PI/180;     // x-rotation angle
-  float pitch = xzAngle * PI/180;    // y-rotation angle
-  float heading = xyAngle * PI/180;  // z-rotation angle
-          
-  //println(str(data.get(i)));
-  
+            
   /* x-axis rotation: */
   y_new1 = y * cos(roll) - z * sin(roll);
   z_new1 = y * sin(roll) + z * cos(roll);
