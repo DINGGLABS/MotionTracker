@@ -19,7 +19,7 @@ boolean G_ROTATION = true;                  // rotate by the g-error
 boolean ACCEL_OFFSETS = true;               // remove g-shares
 boolean ANGLE_OFFSETS = false;              // remove angle offsets
 boolean EXP_ERROR_CORRECTION = true;        // remove exponential errors
-boolean TRAPEZ = false;                     // alternative integration calculation
+boolean TRAPEZ = false;                     // oldernative integration calculation
 
 boolean SHOW_RAW_DATA = false;              // shows raw data
 boolean SHOW_ROTATED_DATA = false;          // shows data after the rotations
@@ -273,34 +273,34 @@ void calculateVelocityVectors()
     //println(dt);
    
 //   float[] delta_winkel = { data.get(i)[7] - data.get(i-1)[7], data.get(i)[6] - data.get(i-1)[6], data.get(i)[5] - data.get(i-1)[5] };  //blup
-//   float[] v_alt_ungedreht = {velocityVectors.get(i-1)[0], velocityVectors.get(i-1)[1], velocityVectors.get(i-1)[2]};  //blup
-//   float[] v_alt_gedreht = v_alt_ungedreht;//rotateArrayVector(v_alt_ungedreht, delta_winkel[0], delta_winkel[1], delta_winkel[2]);
+//   float[] v_old_ungedreht = {velocityVectors.get(i-1)[0], velocityVectors.get(i-1)[1], velocityVectors.get(i-1)[2]};  //blup
+//   float[] v_old_gedreht = v_old_ungedreht;//rotateArrayVector(v_old_ungedreht, delta_winkel[0], delta_winkel[1], delta_winkel[2]);
    
 //   print(str(delta_winkel));
 //   print("\t");
-//   print(str(v_alt_ungedreht));
+//   print(str(v_old_ungedreht));
 //   print("\t");
-//   print(str(v_alt_gedreht));
+//   print(str(v_old_gedreht));
 //   print("\t");
    
-    float vx_neu, vy_neu, vz_neu;
+    float vx_new, vy_new, vz_new;
     if (TRAPEZ)
     {
       /* trapezoidal rule:
-      /* v_neu = v_alt + (a2 + a1)/2 * dt */
-      vx_neu = velocityVectors.get(i-1)[0] + (accelerationVectors.get(i)[0] + accelerationVectors.get(i-1)[0])/2 * dt;
-      vy_neu = velocityVectors.get(i-1)[1] + (accelerationVectors.get(i)[1] + accelerationVectors.get(i-1)[1])/2 * dt;
-      vz_neu = velocityVectors.get(i-1)[2] + (accelerationVectors.get(i)[2] + accelerationVectors.get(i-1)[2])/2 * dt;
+      /* v_new = v_old + (a2 + a1)/2 * dt */
+      vx_new = velocityVectors.get(i-1)[0] + (accelerationVectors.get(i)[0] + accelerationVectors.get(i-1)[0])/2 * dt;
+      vy_new = velocityVectors.get(i-1)[1] + (accelerationVectors.get(i)[1] + accelerationVectors.get(i-1)[1])/2 * dt;
+      vz_new = velocityVectors.get(i-1)[2] + (accelerationVectors.get(i)[2] + accelerationVectors.get(i-1)[2])/2 * dt;
     }
     else
     {
-      /* v_neu = v_alt + dv = v_alt + (a * dt) */
-      vx_neu = velocityVectors.get(i-1)[0] + (accelerationVectors.get(i)[0] * dt);
-      vy_neu = velocityVectors.get(i-1)[1] + (accelerationVectors.get(i)[1] * dt);
-      vz_neu = velocityVectors.get(i-1)[2] + (accelerationVectors.get(i)[2] * dt);
+      /* v_new = v_old + dv = v_old + (a * dt) */
+      vx_new = velocityVectors.get(i-1)[0] + (accelerationVectors.get(i)[0] * dt);
+      vy_new = velocityVectors.get(i-1)[1] + (accelerationVectors.get(i)[1] * dt);
+      vz_new = velocityVectors.get(i-1)[2] + (accelerationVectors.get(i)[2] * dt);
     }
     
-    float v[] = {vx_neu, vy_neu, vz_neu}; 
+    float v[] = {vx_new, vy_new, vz_new}; 
     velocityVectors.add(i, v);
     
 //    print(i + ":");
@@ -340,40 +340,40 @@ void velocityExpErrorCorrection()
     
     for (int i = 1; i < numberOfRows; i++)
     {
-      float vx_alt = velocityVectors.get(i)[0];
-      float vy_alt = velocityVectors.get(i)[1];
-      float vz_alt = velocityVectors.get(i)[2];
-      float vx_neu, vy_neu, vz_neu;
+      float vx_old = velocityVectors.get(i)[0];
+      float vy_old = velocityVectors.get(i)[1];
+      float vz_old = velocityVectors.get(i)[2];
+      float vx_new, vy_new, vz_new;
   
       if (SHOW_EXP_ERROR_CORRECTION)
       {
         println("i = " + i);
-        println("vx_alt = " + vx_alt);
+        println("vx_old = " + vx_old);
         println("minus_x = " + vx_start * pow(expValue_x, (float)i));
       }
       
-      /* v_neu = v_alt - (v_start * e_v^i) = v_alt - minus */
+      /* v_new = v_old - (v_start * e_v^i) = v_old - minus */
       float minus_x = vx_start * pow(expValue_x, (float)i);
-      if (abs(minus_x) > abs(vx_alt)) vx_neu = 0;
-      else vx_neu = vx_alt - minus_x;  
-      if (abs(vx_neu) > abs(vx_alt)) vx_neu = 0;  // error handling when minus is not exactly v_alt in the end
+      if (abs(minus_x) > abs(vx_old)) vx_new = 0;
+      else vx_new = vx_old - minus_x;  
+      if (abs(vx_new) > abs(vx_old)) vx_new = 0;  // error handling when minus is not exactly v_old in the end
       
       float minus_y = vy_start * pow(expValue_y, (float)i);
-      if (abs(minus_y) > abs(vy_alt)) vy_neu = 0;
-      else vy_neu = vy_alt - minus_y;
-      if (abs(vy_neu) > abs(vy_alt)) vy_neu = 0;
+      if (abs(minus_y) > abs(vy_old)) vy_new = 0;
+      else vy_new = vy_old - minus_y;
+      if (abs(vy_new) > abs(vy_old)) vy_new = 0;
       
       float minus_z = vz_start * pow(expValue_z, (float)i);
-      if (abs(minus_z) > abs(vz_alt)) vz_neu = 0;
-      else vz_neu = vz_alt - minus_z;
-      if (abs(vz_neu) > abs(vz_alt)) vz_neu = 0;
+      if (abs(minus_z) > abs(vz_old)) vz_new = 0;
+      else vz_new = vz_old - minus_z;
+      if (abs(vz_new) > abs(vz_old)) vz_new = 0;
       
-      float v[] = {vx_neu, vy_neu, vz_neu}; 
+      float v[] = {vx_new, vy_new, vz_new}; 
       velocityVectors.set(i, v);
       
       if (SHOW_EXP_ERROR_CORRECTION)
       {
-        println("vx_neu = " + velocityVectors.get(i)[0]);
+        println("vx_new = " + velocityVectors.get(i)[0]);
         println("");
       }
       
@@ -398,23 +398,23 @@ void calculateTrailVectors()
     float dt = data.get(i)[0] - data.get(i-1)[0];
     //println(dt);
           
-    float sx_neu, sy_neu, sz_neu;
+    float sx_new, sy_new, sz_new;
     if (TRAPEZ)
     {
-      /* s_neu = s_alt + ds = s_alt + (v_neu * dt) */
-      sx_neu = trailVectors.get(i-1)[0] + velocityVectors.get(i)[0] * dt;
-      sy_neu = trailVectors.get(i-1)[1] + velocityVectors.get(i)[1] * dt;
-      sz_neu = trailVectors.get(i-1)[2] + velocityVectors.get(i)[2] * dt;
+      /* s_new = s_old + ds = s_old + (v_new * dt) */
+      sx_new = trailVectors.get(i-1)[0] + velocityVectors.get(i)[0] * dt;
+      sy_new = trailVectors.get(i-1)[1] + velocityVectors.get(i)[1] * dt;
+      sz_new = trailVectors.get(i-1)[2] + velocityVectors.get(i)[2] * dt;
     }
     else
     {
-      /* trapezoidal rule: s_neu = s_alt + (v2 + v1)/2 * dt */
-      sx_neu = trailVectors.get(i-1)[0] + (velocityVectors.get(i)[0] + velocityVectors.get(i-1)[0])/2 * dt;
-      sy_neu = trailVectors.get(i-1)[1] + (velocityVectors.get(i)[1] + velocityVectors.get(i-1)[1])/2 * dt;
-      sz_neu = trailVectors.get(i-1)[2] + (velocityVectors.get(i)[2] + velocityVectors.get(i-1)[2])/2 * dt;
+      /* trapezoidal rule: s_new = s_old + (v2 + v1)/2 * dt */
+      sx_new = trailVectors.get(i-1)[0] + (velocityVectors.get(i)[0] + velocityVectors.get(i-1)[0])/2 * dt;
+      sy_new = trailVectors.get(i-1)[1] + (velocityVectors.get(i)[1] + velocityVectors.get(i-1)[1])/2 * dt;
+      sz_new = trailVectors.get(i-1)[2] + (velocityVectors.get(i)[2] + velocityVectors.get(i-1)[2])/2 * dt;
     }
     
-    float s[] = {sx_neu, sy_neu, sz_neu};
+    float s[] = {sx_new, sy_new, sz_new};
     trailVectors.add(i, s);
     
 //    print(i + ":");
@@ -475,11 +475,11 @@ void draw2DDiagramAxes()
   float m = 10;  // multiplicator
   
 
-  float t_alt = 0;
-  float var_alt = 0;
+  float t_old = 0;
+  float var_old = 0;
   for (int i = 1; i < numberOfRows; i++)
   {
-    float t_neu = t_alt + (data.get(i)[0] - data.get(i-1)[0]) * m;
+    float t_new = t_old + (data.get(i)[0] - data.get(i-1)[0]) * m;
     
     /* magnitude of acceleration vector */
     float x = accelerationVectors.get(i)[0] * m;
@@ -496,13 +496,13 @@ void draw2DDiagramAxes()
 //    float y = trailVectors.get(i)[1] * m;
 //    float z = trailVectors.get(i)[2] * m;
     
-    float var_neu = sqrt(x*x + y*y + z*z);
+    float var_new = sqrt(x*x + y*y + z*z);
     
     /* draw lines */
-    line(t_alt, var_alt, t_neu, var_neu);
+    line(t_old, var_old, t_new, var_new);
     
-    t_alt = t_neu;
-    var_alt = var_neu;
+    t_old = t_new;
+    var_old = var_new;
     
 //    /* draw points */
 //    if (i%5 == 0)
