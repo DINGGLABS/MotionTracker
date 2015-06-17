@@ -21,6 +21,7 @@ boolean firstContact = false;
 String s = "knock";  // handshacke key
 
 /* switches */
+boolean ENABLE_CALIBRATION = true;          // enable the calibration
 boolean CHANGING_FILTER_CONSTANT = false;   // recalculate filter constant on base of current gyro magnitude
 boolean USE_MAGNETOMETER = false;           // uses the magnetometer to calculate the heading instead of the acceleration vector
 boolean ROTATE = true;                      // rotate data to fit them to the room coordinate system
@@ -134,7 +135,7 @@ void serialEvent( Serial myPort)
         if (SHOW_RAW_DATA) println(str(data.get(0)));
         
         /* check calibration flag */
-        if (calibrationFlag)
+        if (calibrationFlag && ENABLE_CALIBRATION)
         {
           /* collect first few data for calibration */
           if (cCnt < NUMBER_OF_DATA_TO_CALIBRATE)
@@ -225,20 +226,8 @@ void serialEvent( Serial myPort)
           
           if (SHOW_FILTERED_ORIENTATION) println("roll = " + o[0]*180/PI + " pitch = " + o[1]*180/PI + " heading = " + o[2]*180/PI);
           
-//          /* remove orientation offsets */
-//          if (REMOVE_ORIENTATION_OFFSET)  // ATTENTION: only allowed when calibrated on a plane ground!
-//          {
-//            o[0] -= calibrations.get(1)[0];
-//            o[1] -= calibrations.get(1)[1];
-//            o[2] -= calibrations.get(1)[2];
-//            
-//            println("orientation-offset = " + calibrations.get(1)[0]*180/PI + ", " + calibrations.get(1)[1]*180/PI + ", " + calibrations.get(1)[2]*180/PI);
-//          }  
-          
-          /* update global orientation vector */
-          orientationVector.set(0, o);
-          
-          /* remove g offset */
+          /* remove tilt compensated g offset */
+          float a[] = {ax, ay, az}; 
           if (REMOVE_G_VECTOR)
           {
             float g[] = getGravityVector(o[0], o[1]);  // (roll, pitch)
@@ -249,10 +238,8 @@ void serialEvent( Serial myPort)
             println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
           }
           
-          float a[] = {ax, ay, az};          
           /* rotate acceleration vector to fit them to the room coordinate system */
           if (ROTATE) a = rotateArrayVector(a, o[0], o[1], o[2]);  // (a, roll, pitch, heading)
-
 
           /* update global acceleration vector */
           accelerationVector.set(0, a);
@@ -263,10 +250,12 @@ void serialEvent( Serial myPort)
             o[0] -= calibrations.get(1)[0];
             o[1] -= calibrations.get(1)[1];
             o[2] -= calibrations.get(1)[2];
-            orientationVector.set(0, o);
             
             println("orientation-offset = " + calibrations.get(1)[0]*180/PI + ", " + calibrations.get(1)[1]*180/PI + ", " + calibrations.get(1)[2]*180/PI);
           }          
+          
+          /* update global orientation vector */
+          orientationVector.set(0, o);
           
           /* get velocity vecotr */
           float v[] = getVelocityVector(dt);
@@ -409,8 +398,7 @@ float[] getGravityVector(float roll, float pitch)
   float gravity = sqrt(sq(calibrations.get(0)[0]) + sq(calibrations.get(0)[1]) + sq(calibrations.get(0)[2]));
   float gx = gravity * sin(pitch);
   float gy = gravity * cos(pitch) * sin(roll);
-  float gz;
-  = -gravity * cos(pitch) * cos(roll);
+  float gz = gravity * cos(pitch) * cos(roll);
   
   println("g = " + gravity);
   
