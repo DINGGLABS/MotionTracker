@@ -13,6 +13,7 @@ float GRAVITY = 9.81;            // will be used if ENABLE_CALIBRATION is disabl
 float MAX_GYRO_MAGNITUDE = 300;  // will be used if CHANGING_FILTER_CONSTANT is enabled
 float FILTER_CONSTANT = 0.5;     // will be used if CHANGING_FILTER_CONSTANT is disabled
 float ACCEL_THRESHOLD = 0.5;     // threshold in m/s^2 to observe before integrating the accelerations
+int NUMBER_OF_DATA_TO_CALIBRATE = 20;//50;
 
 /* communication */
 int BAUDRATE = 112600;
@@ -35,6 +36,8 @@ boolean SHOW_FILTERED_ORIENTATION = true;       // shows the orientation before 
 //boolean SHOW_EXP_ERROR_CORRECTION = false;      // shows velocity vectors after the exponential error corrections
 boolean SHOW_VECTORS = true;                    // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
 
+boolean DISPLAY_FLOATING_OBJECT = false;         // displays the floating object which moves according the current orientation
+
 ///* drawing multiplicators */
 //int ma = 10;
 //int mv = 10;
@@ -56,14 +59,12 @@ ArrayList<float[]> trailVector = new ArrayList();         // global generic arra
 
 /* calibration variables */
 boolean calibrationFlag = true;
-int NUMBER_OF_DATA_TO_CALIBRATE = 50;
 int cCnt = 0;  // calibration counter
 
 /* setup */
 void setup()
 {
   /* setup window */
-  //size(X, Y);
   size(X, Y, P3D);
   //background(255, 255, 255);
   textSize(20);
@@ -87,16 +88,24 @@ void setup()
 /* loop */
 void draw()
 { 
-  //draw2DDiagramAxes();
-  draw3DDiagramAxes();
-  
-  //drawAccelerationVectors();
-  //drawVelocityVectors();
-  //drawTrailVectors();
-  
-  drawFloatingObject();
-    
-  popMatrix();
+  if (!calibrationFlag)
+  {
+    if (DISPLAY_FLOATING_OBJECT)
+    {
+      draw3DDiagramAxes();
+      
+      drawFloatingObject();
+    }
+    else 
+    {
+      draw2DDiagramAxes();
+      
+      drawAccelerationVectors();
+      drawVelocityVectors();
+    }
+       
+    popMatrix();
+  }
 }
 
 void serialEvent( Serial myPort)
@@ -291,7 +300,7 @@ float[] getOrientationGyro(float dt, float wx, float wy, float wz)
 /* calculate orientations in rad from the acceleration vector */
 float[] getOrientationAccel(float ax, float ay, float az)
 {
-  float u = 0.001;
+  float u = 0.001;  //blup
   float roll_a    = atan2(ay, az);//atan2(ay, sign(az)*sqrt(az*az + u*ax*ax));  // get roll (yz-axis rotation) -> -PI... PI
   float pitch_a   = atan2(ax, sqrt(ay*ay + az*az));  // get pitch (xz-axis rotation) -> -PI/2... PI/2
   float heading_a = atan2(ay, ax);                   // get heading (xy-axis rotation) -> -PI... PI
@@ -576,95 +585,79 @@ void draw3DAxes(int l, int textOffset)
 }
 /*------------------------------------------------------------------*/
 
-///*------------------------------------------------------------------*/  
-//void drawAccelerationVectors()
-//{
-//  for (int i = 1; i < numberOfRows; i++)
-//  {
-//    stroke(int(i * (255.0 / numberOfRows)), int(i * (255.0 / numberOfRows)), int(i * (255.0 / numberOfRows)));
-//    float last_dsx = accelerationVectors.get(i-1)[0] * ma;
-//    float last_dsy = accelerationVectors.get(i-1)[1] * ma;
-//    float last_dsz = accelerationVectors.get(i-1)[2] * ma;
-//    float new_dsx = accelerationVectors.get(i)[0] * ma;
-//    float new_dsy = accelerationVectors.get(i)[1] * ma;
-//    float new_dsz = accelerationVectors.get(i)[2] * ma;
-//    
-////    line(last_dsx, last_dsy, new_dsx, new_dsy);             // 2D (x and y)
-////    line(last_dsx, last_dsz, new_dsx, new_dsz);             // 2D (x and z)
-////    line(last_dsy, last_dsz, new_dsy, new_dsz);             // 2D (y and z)
-//    line(last_dsx, last_dsy, last_dsz, new_dsx, new_dsy, new_dsz);  // 3D
-//
-////    /* draw points */
-////    if (i%5 == 0)
-////    {
-////      pushMatrix();
-////      translate(new_dsx, new_dsy, new_dsz);
-////      sphere(1);
-////      popMatrix();
-////    }
-//  }
-//}
-///*------------------------------------------------------------------*/
-//
-///*------------------------------------------------------------------*/  
-//void drawVelocityVectors()
-//{
-//  for (int i = 1; i < numberOfRows; i++)
-//  {
-//    stroke(255, 50, int(i * (255.0 / numberOfRows)));
-//    float last_dsx = velocityVectors.get(i-1)[0] * mv;
-//    float last_dsy = velocityVectors.get(i-1)[1] * mv;
-//    float last_dsz = velocityVectors.get(i-1)[2] * mv;
-//    float new_dsx = velocityVectors.get(i)[0] * mv;
-//    float new_dsy = velocityVectors.get(i)[1] * mv;
-//    float new_dsz = velocityVectors.get(i)[2] * mv;
-//    
-////    line(last_dsx, last_dsy, new_dsx, new_dsy);             // 2D (x and y)
-////    line(last_dsx, last_dsz, new_dsx, new_dsz);             // 2D (x and z)
-////    line(last_dsy, last_dsz, new_dsy, new_dsz);             // 2D (y and z)
-//    line(last_dsx, last_dsy, last_dsz, new_dsx, new_dsy, new_dsz);  // 3D
-//
-////    /* draw points */
-////    if (i%5 == 0)
-////    {
-////      pushMatrix();
-////      translate(new_dsx, new_dsy, new_dsz);
-////      sphere(1);
-////      popMatrix();
-////    }
-//  }
-//}
-///*------------------------------------------------------------------*/
-//
-///*------------------------------------------------------------------*/  
-//void drawTrailVectors()
-//{
-//  for (int i = 1; i < numberOfRows; i++)
-//  {
-//    stroke(0, 255, int(i * (255.0 / numberOfRows)));
-//    float last_dsx = trailVectors.get(i-1)[0] * ms;
-//    float last_dsy = trailVectors.get(i-1)[1] * ms;
-//    float last_dsz = trailVectors.get(i-1)[2] * ms;
-//    float new_dsx = trailVectors.get(i)[0] * ms;
-//    float new_dsy = trailVectors.get(i)[1] * ms;
-//    float new_dsz = trailVectors.get(i)[2] * ms;
-//    
-////    line(last_dsx, last_dsy, new_dsx, new_dsy);             // 2D (x and y)
-////    line(last_dsx, last_dsz, new_dsx, new_dsz);             // 2D (x and z)
-////    line(last_dsy, last_dsz, new_dsy, new_dsz);             // 2D (y and z)
-//    line(last_dsx, last_dsy, last_dsz, new_dsx, new_dsy, new_dsz);  // 3D
-//
-////    /* draw points */
-////    if (i%5 == 0)
-////    {
-////      pushMatrix();
-////      translate(new_dsx, new_dsy, new_dsz);
-////      sphere(1);
-////      popMatrix();
-////    }
-//  }
-//}
-///*------------------------------------------------------------------*/
+/*------------------------------------------------------------------*/  
+int cnt = 1;
+ArrayList<float[]> ma = new ArrayList();
+void drawAccelerationVectors()
+{
+  float ax = accelerationVector.get(0)[0];
+  float ay = accelerationVector.get(0)[1];
+  float az = accelerationVector.get(0)[2];
+  
+  float zeros_m[] = {0, 0};
+  if (cnt == 1) ma.add(cnt-1, zeros_m);
+  ma.add(cnt, zeros_m);
+  ma.get(cnt)[0] = az * 10;//sqrt(ax*ax + ay*ay + az*az) * 10;
+  ma.get(cnt)[1] = ma.get(cnt-1)[1] + data.get(0)[0] / 1000000;
+  
+  //println("a_new = " + ma.get(cnt)[0] + ", t_new = " + ma.get(cnt)[1]);
+  
+  stroke(50, 50, 255);
+  for (int n = 1; n < cnt; n++) line(ma.get(n-1)[1], ma.get(n-1)[0], ma.get(n)[1], ma.get(n)[0]);
+  
+  cnt++;
+}
+/*------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------*/
+ArrayList<float[]> mv = new ArrayList();
+void drawVelocityVectors()
+{
+  cnt--;
+  
+  float vx = velocityVector.get(0)[0];
+  float vy = velocityVector.get(0)[1];
+  float vz = velocityVector.get(0)[2];
+  
+  float zeros_m[] = {0, 0};
+  if (cnt == 1) mv.add(cnt-1, zeros_m);
+  mv.add(cnt, zeros_m);
+  mv.get(cnt)[0] = vz * 10;//sqrt(vx*vx + vy*vy + vz*vz) * 10;
+  mv.get(cnt)[1] = mv.get(cnt-1)[1] + data.get(0)[0] / 1000000;
+  
+  //println("v_new = " + mv.get(cnt)[0] + ", t_new = " + mv.get(cnt)[1]);
+  
+  stroke(50, 250, 55);
+  for (int n = 1; n < cnt; n++) line(mv.get(n-1)[1], mv.get(n-1)[0], mv.get(n)[1], mv.get(n)[0]);
+  
+  cnt++;
+}
+/*------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------*/
+ArrayList<float[]> ms = new ArrayList();
+void drawTrailVectors()
+{
+  cnt--;
+  
+  float sx = trailVector.get(0)[0];
+  float sy = trailVector.get(0)[1];
+  float sz = trailVector.get(0)[2];
+  
+  float zeros_m[] = {0, 0};
+  if (cnt == 1) ms.add(cnt-1, zeros_m);
+  ms.add(cnt, zeros_m);
+  ms.get(cnt)[0] = sqrt(sx*sx + sy*sy + sz*sz) * 10;
+  ms.get(cnt)[1] = ms.get(cnt-1)[1] + data.get(0)[0] / 1000000;
+  
+  //println("s_new = " + ms.get(cnt)[0] + ", t_new = " + ms.get(cnt)[1]);
+  
+  stroke(250, 50, 55);
+  for (int n = 1; n < cnt; n++) line(ms.get(n-1)[1], ms.get(n-1)[0], ms.get(n)[1], ms.get(n)[0]);
+  
+  cnt++;
+}
+/*------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------*/
 void drawFloatingObject()
