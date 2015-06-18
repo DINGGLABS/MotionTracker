@@ -12,7 +12,7 @@ int NUMBER_OF_SENSOR_DATA = 11;  // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T
 float GRAVITY = 9.81;            // will be used if ENABLE_CALIBRATION is disabled
 float MAX_GYRO_MAGNITUDE = 300;  // will be used if CHANGING_FILTER_CONSTANT is enabled
 float FILTER_CONSTANT = 0.5;     // will be used if CHANGING_FILTER_CONSTANT is disabled
-float ACCEL_THRESHOLD = 0.5;     // threshold in m/s^2 to observe before integrating the accelerations
+float ACCEL_THRESHOLD = 1.0;     // threshold in m/s^2 to observe before integrating the accelerations
 int NUMBER_OF_DATA_TO_CALIBRATE = 20;//50;
 
 /* communication */
@@ -23,10 +23,11 @@ String s = "knock";  // handshacke key
 
 /* switches */
 boolean ENABLE_CALIBRATION = true;              // enable the calibration
-boolean CHANGING_FILTER_CONSTANT = false;       // recalculate filter constant on base of current gyro magnitude
-boolean USE_MAGNETOMETER = false;               // uses the magnetometer to calculate the heading instead of the acceleration vector
-boolean ROTATE = true;                          // rotate data to fit them to the room coordinate system
+boolean CHANGING_FILTER_CONSTANT = false;       // recalculate filter constant on base of current gyro magnitude and MAX_GYRO_MAGNITUDE
+boolean USE_MAGNETOMETER = false;               // uses the more accurate magnetometer to calculate the heading instead of the acceleration vector
 boolean REMOVE_G_VECTOR = true;                 // remove g-vector
+boolean ROTATE = true;                          // rotate data to fit them to the room coordinate system
+boolean NOISE_NEAR_ZERO_CANCELING = true;       // cut off the noise near 0 by taking an ACCEL_TRESHHOLD into account
 boolean REMOVE_ORIENTATION_OFFSET = true;       // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
 //boolean EXP_ERROR_CORRECTION = true;            // remove exponential velocity errors
 
@@ -106,9 +107,14 @@ void draw()
        
     popMatrix();
   }
+  
+}
+void keyPressed()
+{
+  cnt = 1;
 }
 
-void serialEvent( Serial myPort)
+void serialEvent(Serial myPort)
 {
   /* put the incoming data into a string */
   String stringVal = myPort.readStringUntil('\n');  //the '\n' is our end delimiter indicating the end of a complete packet
@@ -235,20 +241,29 @@ void serialEvent( Serial myPort)
           }
                     
           /* remove tilt compensated g offset */
-          float a[] = {ax, ay, az}; 
+          
           if (REMOVE_G_VECTOR)
           {
             float g[] = getGravityVector(o[0], o[1]);  // (roll, pitch)
-            a[0] -= g[0];
-            a[1] -= g[1];
-            a[2] -= g[2];
+            ax -= g[0];
+            ay -= g[1];
+            az -= g[2];
             
             println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
           }
           
           /* rotate acceleration vector to fit them to the room coordinate system */
+          float a[] = {ax, ay, az}; 
           if (ROTATE) a = rotateArrayVector(a, o[0], o[1], o[2]);  // (a, roll, pitch, heading)
-
+          
+          /* cut off nois near 0 by taking a accelerometer threshold into account */
+          if (NOISE_NEAR_ZERO_CANCELING)
+          {
+            if (abs(a[0]) < ACCEL_THRESHOLD) a[0] = 0;
+            if (abs(a[1]) < ACCEL_THRESHOLD) a[1] = 0;
+            if (abs(a[2]) < ACCEL_THRESHOLD) a[2] = 0;
+          }
+          
           /* update global acceleration vector */
           accelerationVector.set(0, a);
           
