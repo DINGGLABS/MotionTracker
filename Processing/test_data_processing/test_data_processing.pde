@@ -58,6 +58,11 @@ ArrayList<float[]> accelerationVector = new ArrayList();  // global generic arra
 ArrayList<float[]> velocityVector = new ArrayList();      // global generic array list
 ArrayList<float[]> trailVector = new ArrayList();         // global generic array list
 
+int vectorCnt = 0;
+int vectorCnt_old = 0;
+int displayCnt = 1;
+
+
 /* calibration variables */
 boolean calibrationFlag = true;
 int cCnt = 0;  // calibration counter
@@ -101,17 +106,16 @@ void draw()
     {
       draw2DDiagramAxes();
       
-      drawAccelerationVectors();
-      drawVelocityVectors();
+      drawVectors();
     }
        
     popMatrix();
   }
-  
 }
+
 void keyPressed()
 {
-  cnt = 1;
+  displayCnt = 1;
 }
 
 void serialEvent(Serial myPort)
@@ -126,16 +130,18 @@ void serialEvent(Serial myPort)
     stringVal = trim(stringVal);  // necessary to realize the handshacke key
     //println(stringVal);
       
-    if (firstContact == false)
+    if (!firstContact)
     {
       /* look for our "knock" string to start the handshake */
       if (stringVal.equals(s))
       {
-        /* if it's there, clear the buffer and send a request for data */
+        println("contact established");
+        
+        /* clear the buffer and send a request for data */
         myPort.clear();
         firstContact = true;
-        myPort.write("let's go!");  // data request
-        println("contact established!");
+        myPort.write("who's there?");  // data request
+        println("data request sent");
       }
     }
     else
@@ -146,7 +152,7 @@ void serialEvent(Serial myPort)
       /* check if data is a number */
       if (!Float.isNaN(da[0]))
       {
-        /* set data vector */
+        /* set data */
         data.set(0, da);    
         if (SHOW_RAW_DATA) println(str(data.get(0)));
         
@@ -156,7 +162,7 @@ void serialEvent(Serial myPort)
           /* collect first few data for calibration */
           if (cCnt < NUMBER_OF_DATA_TO_CALIBRATE)
           {
-            print("collect calibration data: ");
+            print("calibration data collected \t");
             data.add(cCnt+1, da);
             cCnt++;
           }
@@ -190,9 +196,9 @@ void serialEvent(Serial myPort)
             float a_c[] = {ax_c, ay_c, az_c};
             
             /* get calibration orientations */
-            float o_g_c[] = getOrientationGyro(dt_c, wx_c, wy_c, wz_c);
+            float o_g_c[] = getOrientationGyro(vectorCnt, dt_c, wx_c, wy_c, wz_c);
             float o_a_c[] = getOrientationAccel(ax_c, ay_c, az_c);
-                  
+            
             /* fuse calibration orientations */
             float o_c[] = fuseOrientations(FILTER_CONSTANT, o_g_c, o_a_c);
             
@@ -227,7 +233,7 @@ void serialEvent(Serial myPort)
           float wz = data.get(0)[9];
           
           /* get orientations */
-          float o_g[] = getOrientationGyro(dt, wx, wy, wz);
+          float o_g[] = getOrientationGyro(vectorCnt, dt, wx, wy, wz);
           float o_a[] = getOrientationAccel(ax, ay, az);
           
           /* fuse orientations */
@@ -241,7 +247,6 @@ void serialEvent(Serial myPort)
           }
                     
           /* remove tilt compensated g offset */
-          
           if (REMOVE_G_VECTOR)
           {
             float g[] = getGravityVector(o[0], o[1]);  // (roll, pitch)
@@ -265,7 +270,7 @@ void serialEvent(Serial myPort)
           }
           
           /* update global acceleration vector */
-          accelerationVector.set(0, a);
+          accelerationVector.add(vectorCnt, a);
           
           /* remove orientation offsets */
           if (REMOVE_ORIENTATION_OFFSET)  // ATTENTION: only allowed when calibrated on a plane ground!
@@ -278,18 +283,21 @@ void serialEvent(Serial myPort)
           }          
           
           /* update global orientation vector */
-          orientationVector.set(0, o);
+          orientationVector.add(vectorCnt, o);
           
           /* get velocity vecotr */
-          float v[] = getVelocityVector(dt);
-          velocityVector.add(0, v);  // update global velocity vector
+          float v[] = getVelocityVector(vectorCnt, dt);
+          velocityVector.add(vectorCnt, v);  // update global velocity vector
           
           /* get trail vector */
-          float s[] = getTrailVector(dt); 
-          trailVector.add(0, s);  // update global trail vector
-                    
+          float s[] = getTrailVector(vectorCnt, dt); 
+          trailVector.add(vectorCnt, s);  // update global trail vector
+          
           /* display data */
-          showVectors();
+          showVectors(vectorCnt);
+                    
+          /* update vector counter */
+          vectorCnt++;
         }
       }
     }
@@ -298,12 +306,14 @@ void serialEvent(Serial myPort)
 
 /*------------------------------------------------------------------*/
 /* integrate gyro values to get orientations in rad */
-float[] getOrientationGyro(float dt, float wx, float wy, float wz)
-{         
+float[] getOrientationGyro(int vectorNr, float dt, float wx, float wy, float wz)
+{ 
+  if (vectorNr == 0) vectorNr = 1;
+  
   // orientation_new = orientation_old + w * dt
-  float roll_g    = orientationVector.get(0)[0] + wx * dt * PI/180;  // fPhi(wx)
-  float pitch_g   = orientationVector.get(0)[1] + wy * dt * PI/180;  // fTheta(wy)
-  float heading_g = orientationVector.get(0)[2] + wz * dt * PI/180;  // fPsi(wz)
+  float roll_g    = orientationVector.get(vectorNr-1)[0] + wx * dt * PI/180;  // fPhi(wx)
+  float pitch_g   = orientationVector.get(vectorNr-1)[1] + wy * dt * PI/180;  // fTheta(wy)
+  float heading_g = orientationVector.get(vectorNr-1)[2] + wz * dt * PI/180;  // fPsi(wz)
   if (SHOW_NON_FILTERED_ORIENTATIONS) println("roll_g = " + roll_g*180/PI + " pitch_g = " + pitch_g*180/PI + " heading_g = " + heading_g*180/PI);
   
   float o_g[] = {roll_g, pitch_g, heading_g};
@@ -423,15 +433,17 @@ float[] getGravityVector(float roll, float pitch)
 int vCnt = 0;  // global counter
 
 /* integrate acceleration vector to get the velocity vector */
-float[] getVelocityVector(float dt)
+float[] getVelocityVector(int vectorNr, float dt)
 {
   // v_new = v_old + da = v_old + a * dt
-  float ax = accelerationVector.get(0)[0];
-  float ay = accelerationVector.get(0)[1];
-  float az = accelerationVector.get(0)[2];
-  float vx = velocityVector.get(0)[0];
-  float vy = velocityVector.get(0)[1];
-  float vz = velocityVector.get(0)[2];
+  float ax = accelerationVector.get(vectorNr)[0];
+  float ay = accelerationVector.get(vectorNr)[1];
+  float az = accelerationVector.get(vectorNr)[2];
+  
+  if (vectorNr == 0) vectorNr = 1;
+  float vx = velocityVector.get(vectorNr-1)[0];
+  float vy = velocityVector.get(vectorNr-1)[1];
+  float vz = velocityVector.get(vectorNr-1)[2];
   
 //  /* take a threshold into account before integrating */
 //  if (abs(ax) > ACCEL_THRESHOLD)
@@ -472,12 +484,14 @@ float[] getVelocityVector(float dt)
 
 /*------------------------------------------------------------------*/ 
 /* integrate velocity vector to get the trail vector */
-float[] getTrailVector(float dt)
+float[] getTrailVector(int vectorNr, float dt)
 {
+  if (vectorNr == 0) vectorNr = 1;
+  
   // s_new = s_old + dv = s_old + v * dt
-  float sx = trailVector.get(0)[0] + velocityVector.get(0)[0] * dt;
-  float sy = trailVector.get(0)[1] + velocityVector.get(0)[1] * dt;
-  float sz = trailVector.get(0)[2] + velocityVector.get(0)[2] * dt;
+  float sx = trailVector.get(vectorNr-1)[0] + velocityVector.get(vectorNr)[0] * dt;
+  float sy = trailVector.get(vectorNr-1)[1] + velocityVector.get(vectorNr)[1] * dt;
+  float sz = trailVector.get(vectorNr-1)[2] + velocityVector.get(vectorNr)[2] * dt;
   
   float s[] = {sx, sy, sz}; 
   return s;
@@ -485,7 +499,7 @@ float[] getTrailVector(float dt)
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/   
-void showVectors()
+void showVectors(int vectorNr)
 {
   if (SHOW_VECTORS)
   {
@@ -494,12 +508,13 @@ void showVectors()
     
     print(str(data.get(0)[0]));
     print("\t");
-    print(str(accelerationVector.get(0)));
+    print(str(accelerationVector.get(vectorNr)));
     print("\t\t");
-    print(str(velocityVector.get(0)));
+    print(str(velocityVector.get(vectorNr)));
     print("\t\t");
-    println(str(trailVector.get(0)));
-    println("roll = " + orientationVector.get(0)[0]*180/PI + " pitch = " + orientationVector.get(0)[1]*180/PI + " heading = " + orientationVector.get(0)[2]*180/PI);
+    println(str(trailVector.get(vectorNr)));
+    println("roll = " + orientationVector.get(vectorNr)[0]*180/PI + " pitch = " + orientationVector.get(vectorNr)[1]*180/PI +
+            " heading = " + orientationVector.get(vectorNr)[2]*180/PI);
     println("");
   }
 }
@@ -600,97 +615,98 @@ void draw3DAxes(int l, int textOffset)
 }
 /*------------------------------------------------------------------*/
 
-/*------------------------------------------------------------------*/  
-int cnt = 1;
+/*------------------------------------------------------------------*/
 ArrayList<float[]> ma = new ArrayList();
-void drawAccelerationVectors()
-{
-  float ax = accelerationVector.get(0)[0];
-  float ay = accelerationVector.get(0)[1];
-  float az = accelerationVector.get(0)[2];
-  
-  float zeros_m[] = {0, 0};
-  if (cnt == 1) ma.add(cnt-1, zeros_m);
-  ma.add(cnt, zeros_m);
-  ma.get(cnt)[0] = az * 10;//sqrt(ax*ax + ay*ay + az*az) * 10;
-  ma.get(cnt)[1] = ma.get(cnt-1)[1] + data.get(0)[0] / 1000000;
-  
-  //println("a_new = " + ma.get(cnt)[0] + ", t_new = " + ma.get(cnt)[1]);
-  
-  stroke(50, 50, 255);
-  for (int n = 1; n < cnt; n++) line(ma.get(n-1)[1], ma.get(n-1)[0], ma.get(n)[1], ma.get(n)[0]);
-  
-  cnt++;
-}
-/*------------------------------------------------------------------*/
-
-/*------------------------------------------------------------------*/
 ArrayList<float[]> mv = new ArrayList();
-void drawVelocityVectors()
-{
-  cnt--;
-  
-  float vx = velocityVector.get(0)[0];
-  float vy = velocityVector.get(0)[1];
-  float vz = velocityVector.get(0)[2];
-  
-  float zeros_m[] = {0, 0};
-  if (cnt == 1) mv.add(cnt-1, zeros_m);
-  mv.add(cnt, zeros_m);
-  mv.get(cnt)[0] = vz * 10;//sqrt(vx*vx + vy*vy + vz*vz) * 10;
-  mv.get(cnt)[1] = mv.get(cnt-1)[1] + data.get(0)[0] / 1000000;
-  
-  //println("v_new = " + mv.get(cnt)[0] + ", t_new = " + mv.get(cnt)[1]);
-  
-  stroke(50, 250, 55);
-  for (int n = 1; n < cnt; n++) line(mv.get(n-1)[1], mv.get(n-1)[0], mv.get(n)[1], mv.get(n)[0]);
-  
-  cnt++;
-}
-/*------------------------------------------------------------------*/
-
-/*------------------------------------------------------------------*/
 ArrayList<float[]> ms = new ArrayList();
-void drawTrailVectors()
+ArrayList<float[]> mt = new ArrayList();
+void drawVectors()
 {
-  cnt--;
-  
-  float sx = trailVector.get(0)[0];
-  float sy = trailVector.get(0)[1];
-  float sz = trailVector.get(0)[2];
-  
   float zeros_m[] = {0, 0};
-  if (cnt == 1) ms.add(cnt-1, zeros_m);
-  ms.add(cnt, zeros_m);
-  ms.get(cnt)[0] = sqrt(sx*sx + sy*sy + sz*sz) * 10;
-  ms.get(cnt)[1] = ms.get(cnt-1)[1] + data.get(0)[0] / 1000000;
+  if (displayCnt == 1)
+  {
+    ma.add(displayCnt-1, zeros_m);
+    mv.add(displayCnt-1, zeros_m);
+    ms.add(displayCnt-1, zeros_m);
+    mt.add(displayCnt-1, zeros_m);
+  }
   
-  //println("s_new = " + ms.get(cnt)[0] + ", t_new = " + ms.get(cnt)[1]);
+  if (vectorCnt_old != vectorCnt)
+  {    
+    float ax = accelerationVector.get(vectorCnt_old)[0];
+    float ay = accelerationVector.get(vectorCnt_old)[1];
+    float az = accelerationVector.get(vectorCnt_old)[2];
+    float a_old = ma.get(displayCnt-1)[0];
+    float a_new = az * 10;//sqrt(ax*ax + ay*ay + az*az) * 10;
+    
+    float vx = velocityVector.get(vectorCnt_old)[0];
+    float vy = velocityVector.get(vectorCnt_old)[1];
+    float vz = velocityVector.get(vectorCnt_old)[2];
+    float v_old = mv.get(displayCnt-1)[0];
+    float v_new = sqrt(vx*vx + vy*vy + vz*vz) * 10;
+    
+    float sx = trailVector.get(vectorCnt_old)[0];
+    float sy = trailVector.get(vectorCnt_old)[1];
+    float sz = trailVector.get(vectorCnt_old)[2];
+    float s_old = ms.get(displayCnt-1)[0];
+    float s_new = sqrt(sx*sx + sy*sy + sz*sz) * 10;
+    
+    float dt = data.get(0)[0] / 1000000 * 10;  //blup data.get(0) aktuell???
+    float t_old = mt.get(displayCnt-1)[0];
+    float t_new = t_old + dt;
+    
+    ma.add(displayCnt, zeros_m);
+    ma.get(displayCnt)[0] = a_new;
+    
+    mv.add(displayCnt, zeros_m);
+    mv.get(displayCnt)[0] = v_new;
+    
+    ms.add(displayCnt, zeros_m);
+    ms.get(displayCnt)[0] = s_new;
+    
+    mt.add(displayCnt, zeros_m);
+    mt.get(displayCnt)[0] = t_new;
+    
+    displayCnt++;
+    vectorCnt_old = vectorCnt;
+  }
   
-  stroke(250, 50, 55);
-  for (int n = 1; n < cnt; n++) line(ms.get(n-1)[1], ms.get(n-1)[0], ms.get(n)[1], ms.get(n)[0]);
-  
-  cnt++;
+  for (int n = 1; n < displayCnt; n++)
+  {
+    stroke(50, 50, 255);
+    line(mt.get(n-1)[0], ma.get(n-1)[0], mt.get(n)[0], ma.get(n)[0]);
+    
+    //stroke(50, 250, 55);
+    //line(mt.get(n-1)[0], mv.get(n-1)[0], mt.get(n)[0], mv.get(n)[0]);
+    
+    //stroke(250, 50, 55);
+    //line(mt.get(n-1)[0], ms.get(n-1)[0], mt.get(n)[0], ms.get(n)[0]);
+  }
 }
 /*------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------*/
 void drawFloatingObject()
 {
-  float roll    = orientationVector.get(0)[0] + PI/2;
-  float pitch   = orientationVector.get(0)[1];
-  float heading = orientationVector.get(0)[2];
+  if (vectorCnt_old != vectorCnt)
+  {
+    float roll    = orientationVector.get(vectorCnt)[0] + PI/2;
+    float pitch   = orientationVector.get(vectorCnt)[1];
+    float heading = orientationVector.get(vectorCnt)[2];
+      
+    rotateX(roll);
+    rotateY(pitch);
+    //rotateZ(heading);
     
-  rotateX(roll);
-  rotateY(pitch);
-  //rotateZ(heading);
-  
-  fill(0, 255, 100);  // set the disc fill color
-  ellipse(0, 0, width/2, width/3);  // draw the disc
-  
-  fill(255, 255, 255);  // set the text fill color
-  text("roll = " + round((roll-PI/2)*180/PI) + ", pitch = " + round(pitch*180/PI), -82, 10, 1);  // Draw some text so you can tell front from back
-  //line(0, 0, 0, width/4*sin(roll + PI/2), width/4*cos(pitch), 0);
+    fill(0, 255, 100);  // set the disc fill color
+    ellipse(0, 0, width/2, width/3);  // draw the disc
+    
+    fill(255, 255, 255);  // set the text fill color
+    text("roll = " + round((roll-PI/2)*180/PI) + ", pitch = " + round(pitch*180/PI), -82, 10, 1);  // Draw some text so you can tell front from back
+    //line(0, 0, 0, width/4*sin(roll + PI/2), width/4*cos(pitch), 0);
+    
+    vectorCnt_old = vectorCnt;
+  }
 }
 /*------------------------------------------------------------------*/
 
@@ -717,8 +733,6 @@ float[] rotateArrayVector(float vec[], float roll, float pitch, float heading)
   
   float a[] = {x_new2, y_new2, z_new2};
   return a;
-  
-  //println(str(accelerationVectors.get(i)));
 }
 /*------------------------------------------------------------------*/
 
