@@ -9,10 +9,10 @@ int REF_H = 400;
 int REF_B = 150;
 
 int NUMBER_OF_SENSOR_DATA = 11;  // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T (in this order!)
-//float GRAVITY = 9.81;
-
-float FILTER_CONSTANT = 0.5;
-float ACCEL_THRESHOLD = 0.5;  // threshold in m/s^2 to observe before integrating the accelerations
+float GRAVITY = 9.81;            // will be used if ENABLE_CALIBRATION is disabled
+float MAX_GYRO_MAGNITUDE = 300;  // will be used if CHANGING_FILTER_CONSTANT is enabled
+float FILTER_CONSTANT = 0.5;     // will be used if CHANGING_FILTER_CONSTANT is disabled
+float ACCEL_THRESHOLD = 0.5;     // threshold in m/s^2 to observe before integrating the accelerations
 
 /* communication */
 int BAUDRATE = 112600;
@@ -21,18 +21,19 @@ boolean firstContact = false;
 String s = "knock";  // handshacke key
 
 /* switches */
-boolean ENABLE_CALIBRATION = true;          // enable the calibration
-boolean CHANGING_FILTER_CONSTANT = false;   // recalculate filter constant on base of current gyro magnitude
-boolean USE_MAGNETOMETER = false;           // uses the magnetometer to calculate the heading instead of the acceleration vector
-boolean ROTATE = true;                      // rotate data to fit them to the room coordinate system
-boolean REMOVE_G_VECTOR = true;             // remove g-vector
-boolean REMOVE_ORIENTATION_OFFSET = true;   // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
-//boolean EXP_ERROR_CORRECTION = true;        // remove exponential velocity errors
+boolean ENABLE_CALIBRATION = true;              // enable the calibration
+boolean CHANGING_FILTER_CONSTANT = false;       // recalculate filter constant on base of current gyro magnitude
+boolean USE_MAGNETOMETER = false;               // uses the magnetometer to calculate the heading instead of the acceleration vector
+boolean ROTATE = true;                          // rotate data to fit them to the room coordinate system
+boolean REMOVE_G_VECTOR = true;                 // remove g-vector
+boolean REMOVE_ORIENTATION_OFFSET = true;       // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
+//boolean EXP_ERROR_CORRECTION = true;            // remove exponential velocity errors
 
-boolean SHOW_RAW_DATA = true;               // shows raw data 
-boolean SHOW_FILTERED_ORIENTATION = true;   // shows the orientation before removing the orientation offset
-//boolean SHOW_EXP_ERROR_CORRECTION = false;  // shows velocity vectors after the exponential error corrections
-boolean SHOW_VECTORS = true;                // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
+boolean SHOW_RAW_DATA = true;                   // shows raw data 
+boolean SHOW_NON_FILTERED_ORIENTATIONS = true;  // shows the non filtered orientations
+boolean SHOW_FILTERED_ORIENTATION = true;       // shows the orientation before removing the orientation offset
+//boolean SHOW_EXP_ERROR_CORRECTION = false;      // shows velocity vectors after the exponential error corrections
+boolean SHOW_VECTORS = true;                    // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
 
 ///* drawing multiplicators */
 //int ma = 10;
@@ -140,7 +141,7 @@ void serialEvent( Serial myPort)
           /* collect first few data for calibration */
           if (cCnt < NUMBER_OF_DATA_TO_CALIBRATE)
           {
-            println("collect calibration data: ");
+            print("collect calibration data: ");
             data.add(cCnt+1, da);
             cCnt++;
           }
@@ -183,7 +184,7 @@ void serialEvent( Serial myPort)
             /* replace calculated heading with the more accurate one from the magnetometer if enabled */
             if (USE_MAGNETOMETER)
             {
-              o_a_c[2] = getHeading_m(o_c[0], o_c[1]);  // (roll, pitch)
+              o_a_c[2] = getHeading(o_c[0], o_c[1]);  // (roll, pitch)
               o_c = fuseOrientations(FILTER_CONSTANT, o_g_c, o_a_c);
             }
                         
@@ -220,12 +221,10 @@ void serialEvent( Serial myPort)
           /* replace calculated heading with the more accurate one from the magnetometer if enabled */
           if (USE_MAGNETOMETER)
           {
-            o_a[2] = getHeading_m(o[0], o[1]);  // (roll, pitch)
+            o_a[2] = getHeading(o[0], o[1]);  // (roll, pitch)
             o = fuseOrientations(FILTER_CONSTANT, o_g, o_a);
           }
-          
-          if (SHOW_FILTERED_ORIENTATION) println("roll = " + o[0]*180/PI + " pitch = " + o[1]*180/PI + " heading = " + o[2]*180/PI);
-          
+                    
           /* remove tilt compensated g offset */
           float a[] = {ax, ay, az}; 
           if (REMOVE_G_VECTOR)
@@ -281,7 +280,7 @@ float[] getOrientationGyro(float dt, float wx, float wy, float wz)
   float roll_g    = orientationVector.get(0)[0] + wx * dt * PI/180;  // fPhi(wx)
   float pitch_g   = orientationVector.get(0)[1] + wy * dt * PI/180;  // fTheta(wy)
   float heading_g = orientationVector.get(0)[2] + wz * dt * PI/180;  // fPsi(wz)
-  //println("roll_g = " + roll_g*180/PI + " pitch_g = " + pitch_g*180/PI + " heading_g = " + heading_g*180/PI);
+  if (SHOW_NON_FILTERED_ORIENTATIONS) println("roll_g = " + roll_g*180/PI + " pitch_g = " + pitch_g*180/PI + " heading_g = " + heading_g*180/PI);
   
   float o_g[] = {roll_g, pitch_g, heading_g};
   return o_g;
@@ -292,10 +291,12 @@ float[] getOrientationGyro(float dt, float wx, float wy, float wz)
 /* calculate orientations in rad from the acceleration vector */
 float[] getOrientationAccel(float ax, float ay, float az)
 {
-  float roll_a    = atan2(ay, sqrt(ax*ax + az*az));  // get roll (yz-axis rotation) out of the acceleration values
-  float pitch_a   = atan2(ax, sqrt(ay*ay + az*az));  // get pitch (xz-axis rotation) out of the acceleration values
-  float heading_a = getHeading_a();
-  //println("roll_a = " + roll_a*180/PI + " pitch_a = " + pitch_a*180/PI + " heading_a = " + heading_a*180/PI);
+  float u = 0.001;
+  float roll_a    = atan2(ay, az);//atan2(ay, sign(az)*sqrt(az*az + u*ax*ax));  // get roll (yz-axis rotation) -> -PI... PI
+  float pitch_a   = atan2(ax, sqrt(ay*ay + az*az));  // get pitch (xz-axis rotation) -> -PI/2... PI/2
+  float heading_a = atan2(ay, ax);                   // get heading (xy-axis rotation) -> -PI... PI
+  
+  if (SHOW_NON_FILTERED_ORIENTATIONS) println("roll_a = " + roll_a*180/PI + " pitch_a = " + pitch_a*180/PI + " heading_a = " + heading_a*180/PI);
   
   float o_a[] = {roll_a, pitch_a, heading_a};
   return o_a;
@@ -310,13 +311,13 @@ float[] fuseOrientations(float fc, float g[], float a[])  // the bigger fc the b
   if (CHANGING_FILTER_CONSTANT)
   {
     float w_magnitude = sqrt(sq(data.get(0)[7]) + sq(data.get(0)[8]) + sq(data.get(0)[9]));
-    fc = constrain(mapFloat(abs(w_magnitude), 0, 300, 0, 1), 0, 1);  // map and limit gyro magnitude to 0... 1
+    fc = constrain(mapFloat(abs(w_magnitude), 0, MAX_GYRO_MAGNITUDE, 0, 1), 0, 1);  // map and limit gyro magnitude to 0... 1
   }
 
   float roll    = fc * g[0] + (1 - fc) * a[0];
   float pitch   = fc * g[1] + (1 - fc) * a[1];
   float heading = fc * g[2] + (1 - fc) * a[2];
-  //println("roll = " + roll*180/PI + " pitch = " + pitch*180/PI + " heading = " + heading*180/PI);
+  if (SHOW_FILTERED_ORIENTATION) println("roll = " + roll*180/PI + " pitch = " + pitch*180/PI + " heading = " + heading*180/PI);
   
   /* update orientation vector */
   float o[] = {roll, pitch, heading};
@@ -326,7 +327,7 @@ float[] fuseOrientations(float fc, float g[], float a[])  // the bigger fc the b
 
 /*------------------------------------------------------------------*/ 
 /* get tilt compensated heading (xy-axis rotation) out of the magnetometer values */
-float getHeading_m(float roll, float pitch)
+float getHeading(float roll, float pitch)
 {
   float Bx = data.get(0)[4];
   float By = data.get(0)[5];
@@ -342,7 +343,7 @@ float getHeading_m(float roll, float pitch)
   float headX = Bx*cos(pitch) + By*sin(roll)*sin(pitch) + Bz*cos(roll)*sin(pitch);  // tilt compensated magnetic field X component
   float headY = By*cos(roll) - Bz*sin(roll);                                     // tilt compensated magnetic field Y component
   float heading = atan2(-headY, headX);
-  if (heading < 0) heading += 2*PI;
+  if (heading < 0) heading += 2*PI;  //blup
 
 //  /* declination correction (if supplied) */
 //  if( fabs(_declination) > 0.0 )
@@ -376,26 +377,13 @@ YawU=atan2(-yMagnetMap, xMagnetMap) *180/PI;
  Yaw= yawFilteredOld + alphaYaw * (yawRaw - yawFilteredOld);
  yawFilteredOld=Yaw;
  */
-
-/*------------------------------------------------------------------*/ 
-/* get heading (xy-axis rotation) out of the acceleration values (alternative worse variant) */
-float getHeading_a()
-{ 
-  float ax = data.get(0)[1];
-  float ay = data.get(0)[2];
-  float az = data.get(0)[3];
-  
-  float heading_a = atan2(ay, ax);
-  if (heading_a < 0) heading_a += 2*PI;
-  
-  return heading_a;  // in rad
-}
-/*------------------------------------------------------------------*/ 
-
+ 
 /*------------------------------------------------------------------*/ 
 float[] getGravityVector(float roll, float pitch)
 {
-  float gravity = sqrt(sq(calibrations.get(0)[0]) + sq(calibrations.get(0)[1]) + sq(calibrations.get(0)[2]));
+  float gravity = GRAVITY;
+  if (ENABLE_CALIBRATION) gravity = sqrt(sq(calibrations.get(0)[0]) + sq(calibrations.get(0)[1]) + sq(calibrations.get(0)[2]));
+  
   float gx = gravity * sin(pitch);
   float gy = gravity * cos(pitch) * sin(roll);
   float gz = gravity * cos(pitch) * cos(roll);
@@ -421,33 +409,37 @@ float[] getVelocityVector(float dt)
   float vy = velocityVector.get(0)[1];
   float vz = velocityVector.get(0)[2];
   
-  /* take a threshold into account before integrating */
-  if (abs(ax) > ACCEL_THRESHOLD)
-  {
-    vx += ax * dt;
-    vCnt = 0;
-  }
-  else vCnt++;
-  if (abs(ay) > ACCEL_THRESHOLD)
-  {
-    vy += ay * dt;
-    vCnt = 0;
-  }
-  else vCnt++;
-  if (abs(az) > ACCEL_THRESHOLD)
-  {
-    vz += az * dt;
-    vCnt = 0;
-  }
-  else vCnt++;
+//  /* take a threshold into account before integrating */
+//  if (abs(ax) > ACCEL_THRESHOLD)
+//  {
+//    vx += ax * dt;
+//    vCnt = 0;
+//  }
+//  else vCnt++;
+//  if (abs(ay) > ACCEL_THRESHOLD)
+//  {
+//    vy += ay * dt;
+//    vCnt = 0;
+//  }
+//  else vCnt++;
+//  if (abs(az) > ACCEL_THRESHOLD)
+//  {
+//    vz += az * dt;
+//    vCnt = 0;
+//  }
+//  else vCnt++;
+//  
+//  /* reset velocity if it's constant for some time */
+//  if (vCnt >= 10)  //blup
+//  {
+//    vx = 0;
+//    vy = 0;
+//    vz = 0;
+//  }
   
-  /* reset velocity if it's constant for some time */
-  if (vCnt >= 10)  //blup
-  {
-    vx = 0;
-    vy = 0;
-    vz = 0;
-  }
+  vx += ax * dt;
+  vy += ay * dt;
+  vz += az * dt;
   
   float v[] = {vx, vy, vz}; 
   return v;
@@ -726,5 +718,13 @@ float[] rotateArrayVector(float vec[], float roll, float pitch, float heading)
 float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
 {
   return ((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min);
+}
+/*------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------*/
+float sign(float value)
+{
+  if (value > 0) return 1;
+  else return 0;
 }
 /*------------------------------------------------------------------*/
