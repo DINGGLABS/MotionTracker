@@ -2,18 +2,21 @@
 import processing.serial.*;
 
 /* defines */
-int X = 600;
+int X = 800;
 int Y = 600;
 
 int REF_H = 400;
 int REF_B = 150;
 
-int NUMBER_OF_SENSOR_DATA = 11;  // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T (in this order!)
-float GRAVITY = 9.81;            // will be used if ENABLE_CALIBRATION is disabled
-float MAX_GYRO_MAGNITUDE = 300;  // will be used if CHANGING_FILTER_CONSTANT is enabled
-float FILTER_CONSTANT = 0.5;     // will be used if CHANGING_FILTER_CONSTANT is disabled
-float ACCEL_THRESHOLD = 0.5;     // threshold in m/s^2 to observe before integrating the accelerations
-int NUMBER_OF_DATA_TO_CALIBRATE = 20;//50;
+int LINE_OFFSET = 200;
+  
+int NUMBER_OF_SENSOR_DATA = 11;         // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T (in this order!)
+float GRAVITY = 9.81;                   // will be used if ENABLE_CALIBRATION is disabled
+float MAX_GYRO_MAGNITUDE = 300;         // will be used if CHANGING_FILTER_CONSTANT is enabled
+float FILTER_CONSTANT = 0.5;            // will be used if CHANGING_FILTER_CONSTANT is disabled
+float LP_FILTER_CONSTANT_ACCEL = 0.999;  // low pass filter constant for the  accelerations
+float ACCEL_THRESHOLD = 0.5;            // threshold in m/s^2 to observe before integrating the accelerations
+int NUMBER_OF_DATA_TO_CALIBRATE = 200;  // 
 
 /* communication */
 int BAUDRATE = 112600;
@@ -22,22 +25,23 @@ boolean firstContact = false;
 String s = "knock";  // handshacke key
 
 /* switches */
-boolean ENABLE_CALIBRATION = true;              // enable the calibration
-boolean CHANGING_FILTER_CONSTANT = false;       // recalculate filter constant on base of current gyro magnitude and MAX_GYRO_MAGNITUDE
-boolean USE_MAGNETOMETER = false;               // uses the more accurate magnetometer to calculate the heading instead of the acceleration vector
-boolean REMOVE_G_VECTOR = true;                 // remove g-vector
-boolean ROTATE = true;                          // rotate data to fit them to the room coordinate system
-boolean NOISE_NEAR_ZERO_CANCELING = false;       // cut off the noise near 0 by taking an ACCEL_TRESHHOLD into account
-boolean REMOVE_ORIENTATION_OFFSET = true;       // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
-//boolean EXP_ERROR_CORRECTION = true;            // remove exponential velocity errors
+boolean ENABLE_CALIBRATION = true;                // enable the calibration
+boolean FILTER_ACCELERATIONS = true;              // filters the accelerations
+boolean CHANGING_FILTER_CONSTANT = false;         // recalculate filter constant on base of current gyro magnitude and MAX_GYRO_MAGNITUDE
+boolean USE_MAGNETOMETER = false;                 // uses the more accurate magnetometer to calculate the heading instead of the acceleration vector
+boolean REMOVE_G_VECTOR = true;                   // remove g-vector
+boolean ROTATE = true;                            // rotate data to fit them to the room coordinate system
+boolean ACCEL_NOISE_NEAR_ZERO_CANCELING = false;   // cut off the acceleration noise near 0 by taking an ACCEL_TRESHHOLD into account
+boolean REMOVE_ORIENTATION_OFFSET = true;         // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
+//boolean EXP_ERROR_CORRECTION = true;              // remove exponential velocity errors
 
-boolean SHOW_RAW_DATA = true;                   // shows raw data 
-boolean SHOW_NON_FILTERED_ORIENTATIONS = true;  // shows the non filtered orientations
-boolean SHOW_FILTERED_ORIENTATION = true;       // shows the orientation before removing the orientation offset
-//boolean SHOW_EXP_ERROR_CORRECTION = false;      // shows velocity vectors after the exponential error corrections
-boolean SHOW_VECTORS = true;                    // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
+boolean SHOW_RAW_DATA = true;                     // shows raw data 
+boolean SHOW_NON_FILTERED_ORIENTATIONS = true;    // shows the non filtered orientations
+boolean SHOW_FILTERED_ORIENTATION = true;         // shows the orientation before removing the orientation offset
+//boolean SHOW_EXP_ERROR_CORRECTION = false;        // shows velocity vectors after the exponential error corrections
+boolean SHOW_VECTORS = true;                      // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
 
-boolean DISPLAY_FLOATING_OBJECT = false;         // displays the floating object which moves according the current orientation
+boolean DISPLAY_FLOATING_OBJECT = false;          // display floating object which moves according the current orientation, display 2D diagrams otherwise
 
 ///* drawing multiplicators */
 //int ma = 10;
@@ -64,7 +68,6 @@ int displayCnt = 1;
 
 /* calibration variables */
 boolean calibrationFlag = true;
-int cCnt = 0;  // calibration counter
 
 /*------------------------------------------------------------------*/
 /* setup */
@@ -128,6 +131,8 @@ void mouseWheel(MouseEvent e)
 /*------------------------------------------------------------------*/
 void keyPressed()
 {
+  float zeros[] = {0, 0, 0};
+  velocityVector.set(vectorCnt-1, zeros);
   displayCnt = 1;
 }
 /*------------------------------------------------------------------*/
@@ -238,6 +243,10 @@ void serialEvent(Serial myPort)
           float ax = data.get(vectorCnt)[1];
           float ay = data.get(vectorCnt)[2];
           float az = data.get(vectorCnt)[3];
+          float a[] = {ax, ay, az}; 
+          
+          /* filter a */
+          if (FILTER_ACCELERATIONS && vectorCnt != 0) a = lowPassFilter(LP_FILTER_CONSTANT_ACCEL, accelerationVector.get(vectorCnt-1), a);
           
           /* get w */
           float wx = data.get(vectorCnt)[7];
@@ -262,19 +271,18 @@ void serialEvent(Serial myPort)
           if (REMOVE_G_VECTOR)
           {
             float g[] = getGravityVector(o[0], o[1]);  // (roll, pitch)
-            ax -= g[0];
-            ay -= g[1];
-            az -= g[2];
+            a[0] -= g[0];
+            a[1] -= g[1];
+            a[2] -= g[2];
             
             println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
           }
           
           /* rotate acceleration vector to fit them to the room coordinate system */
-          float a[] = {ax, ay, az}; 
           if (ROTATE) a = rotateArrayVector(a, o[0], o[1], o[2]);  // (a, roll, pitch, heading)
           
           /* cut off noise near 0 by taking a accelerometer threshold into account */
-          if (NOISE_NEAR_ZERO_CANCELING)
+          if (ACCEL_NOISE_NEAR_ZERO_CANCELING)
           {
             if (abs(a[0]) < ACCEL_THRESHOLD) a[0] = 0;
             if (abs(a[1]) < ACCEL_THRESHOLD) a[1] = 0;
@@ -314,6 +322,17 @@ void serialEvent(Serial myPort)
       }
     }
   }
+}
+/*------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------*/
+float[] lowPassFilter(float fc, float vec_old[], float vec_new[])
+{
+  vec_new[0] = fc * vec_new[0] + (1 - fc) * vec_old[0];
+  vec_new[1] = fc * vec_new[1] + (1 - fc) * vec_old[1];
+  vec_new[2] = fc * vec_new[2] + (1 - fc) * vec_old[2];
+  
+  return vec_new;
 }
 /*------------------------------------------------------------------*/
 
@@ -564,9 +583,17 @@ void draw2DAxes(int l, int textOffset)
   int tl = l + textOffset;
   fill(255, 255, 255);
   stroke(255, 0, 0);  // red
-  line(-l, 0, 0, l, 0, 0);
-  text("+t", l, 0, 0);
-  text("-t", -tl, 0, 0);
+  line(0, 0, 0, l, 0, 0);
+  text("+tx", l, 0, 0);
+  text("-tx", -tl, 0, 0);
+  
+  line(0, LINE_OFFSET, 0, l, LINE_OFFSET, 0);
+  text("+ty", l, LINE_OFFSET, 0);
+  text("-ty", -tl, LINE_OFFSET, 0);
+  
+  line(0, 2*LINE_OFFSET, 0, l, 2*LINE_OFFSET, 0);
+  text("+tz", l, 2*LINE_OFFSET, 0);
+  text("-tz", -tl, 2*LINE_OFFSET, 0);
   
   stroke(0, 255, 0);  // green
   line(0, -l, 0, 0, l, 0);
@@ -627,7 +654,7 @@ ArrayList<float[]> ms = new ArrayList();
 ArrayList<float[]> mt = new ArrayList();
 void drawVectors2D()
 {
-  float zeros_m[] = {0};
+  float zeros_m[] = {0, 0, 0};
   if (displayCnt == 1)
   {
     ma.add(0, zeros_m);
@@ -638,18 +665,20 @@ void drawVectors2D()
   
   if (vectorCnt_old != vectorCnt)
   { 
+    float ka = 10;
     float ax = accelerationVector.get(vectorCnt_old)[0];
     float ay = accelerationVector.get(vectorCnt_old)[1];
     float az = accelerationVector.get(vectorCnt_old)[2];
     float a_old = ma.get(displayCnt-1)[0];
-    float a_new[] = {az * 10};//{sign(ax)*sign(ay)*sign(az)*sqrt(ax*ax + ay*ay + az*az) * 10};
+    float a_new[] = {ax*ka, ay*ka, az*ka};
     ma.add(displayCnt, a_new);    
     
+    float kv = 10;
     float vx = velocityVector.get(vectorCnt_old)[0];
     float vy = velocityVector.get(vectorCnt_old)[1];
     float vz = velocityVector.get(vectorCnt_old)[2];
     float v_old = mv.get(displayCnt-1)[0];
-    float v_new[] = {vz * 10};//{sign(vx)*sign(vy)*sign(vz)*sqrt(vx*vx + vy*vy + vz*vz) * 10};
+    float v_new[] = {vx*kv, vy*kv, vz*kv};
     mv.add(displayCnt, v_new);
     
 //    float sx = trailVector.get(vectorCnt_old)[0];
@@ -672,9 +701,13 @@ void drawVectors2D()
   {
     stroke(50, 50, 255);
     line(mt.get(n-1)[0], ma.get(n-1)[0], mt.get(n)[0], ma.get(n)[0]);
-        
+    line(mt.get(n-1)[0], ma.get(n-1)[1]+LINE_OFFSET, mt.get(n)[0], ma.get(n)[1]+LINE_OFFSET);
+    line(mt.get(n-1)[0], ma.get(n-1)[2]+2*LINE_OFFSET, mt.get(n)[0], ma.get(n)[2]+2*LINE_OFFSET);
+      
     stroke(50, 250, 55);
     line(mt.get(n-1)[0], mv.get(n-1)[0], mt.get(n)[0], mv.get(n)[0]);
+    line(mt.get(n-1)[0], mv.get(n-1)[1]+LINE_OFFSET, mt.get(n)[0], mv.get(n)[1]+LINE_OFFSET);
+    line(mt.get(n-1)[0], mv.get(n-1)[2]+2*LINE_OFFSET, mt.get(n)[0], mv.get(n)[2]+2*LINE_OFFSET);
     
     //stroke(250, 50, 55);
     //line(mt.get(n-1)[0], ms.get(n-1)[0], mt.get(n)[0], ms.get(n)[0]);
