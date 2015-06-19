@@ -27,7 +27,7 @@
 
 /* sensor defines */
 #define NUMBER_OF_DIFFERENT_DATA        11    // t, ax, ay, az, Bx, By, Bz, wx, wy, wz, T (in this order!)
-#define MEAN                            10    // number of data to summarize before saving
+//#define MEAN                            10    // number of data to summarize before saving
 //#define MEDIAN                        true    // comment out to use MEAN calculation -> uses a lot mor RAM!
 
 /* timer interrupt */               // 78 -> 10ms, 117 -> 15ms, 156 -> 20ms
@@ -345,7 +345,8 @@ void loop()
     }
   }
   #endif
-  #ifndef MEDIAN  // use mean
+  #ifndef MEDIAN
+  #ifdef MEAN  // use mean
   {
     dataArray[0]  += dt;
     dataArray[1]  += accel.acceleration.x;
@@ -397,8 +398,46 @@ void loop()
     }
   }
   #endif
+  #endif
+  #ifndef MEDIAN  // use neither median nor mean
+  {
+    dataArray[0]  = dt;
+    dataArray[1]  = accel.acceleration.x;
+    dataArray[2]  = accel.acceleration.y;
+    dataArray[3]  = accel.acceleration.z;
+    dataArray[4]  = mag.magnetic.x;
+    dataArray[5]  = mag.magnetic.y;
+    dataArray[6]  = mag.magnetic.z;
+    dataArray[7]  = gyro.gyro.x;
+    dataArray[8]  = gyro.gyro.y;
+    dataArray[9]  = gyro.gyro.z;
+    dataArray[10] = temp.temperature;
+    
+//    /* print timestamp in us */
+//    Serial.print(micros()); Serial.print(", ");            // t
   
-  
+    /* print delta time in us */
+    Serial.print(dataArray[0]); Serial.print(", ");        // dt
+        
+    /* print acceleration data in m/s^2 */
+    Serial.print(dataArray[1]); Serial.print(", ");        // ax
+    Serial.print(dataArray[2]); Serial.print(", ");        // ay
+    Serial.print(dataArray[3]); Serial.print(", ");        // az
+    
+    /* print magnetometer data in Gs */
+    Serial.print(dataArray[4]); Serial.print(", ");        // Bx
+    Serial.print(dataArray[5]); Serial.print(", ");        // By
+    Serial.print(dataArray[6]); Serial.print(", ");        // Bz
+    
+    /* print gyroscop data in °/s */
+    Serial.print(dataArray[7]); Serial.print(", ");        // wx
+    Serial.print(dataArray[8]); Serial.print(", ");        // wy
+    Serial.print(dataArray[9]); Serial.print(", ");        // wz
+    
+    /* print temp data in °C */
+    Serial.println(dataArray[10]);                         // T
+  }
+  #endif  
 
   
   
