@@ -27,7 +27,7 @@ boolean CHANGING_FILTER_CONSTANT = false;       // recalculate filter constant o
 boolean USE_MAGNETOMETER = false;               // uses the more accurate magnetometer to calculate the heading instead of the acceleration vector
 boolean REMOVE_G_VECTOR = true;                 // remove g-vector
 boolean ROTATE = true;                          // rotate data to fit them to the room coordinate system
-boolean NOISE_NEAR_ZERO_CANCELING = true;       // cut off the noise near 0 by taking an ACCEL_TRESHHOLD into account
+boolean NOISE_NEAR_ZERO_CANCELING = false;       // cut off the noise near 0 by taking an ACCEL_TRESHHOLD into account
 boolean REMOVE_ORIENTATION_OFFSET = true;       // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
 //boolean EXP_ERROR_CORRECTION = true;            // remove exponential velocity errors
 
@@ -627,51 +627,43 @@ ArrayList<float[]> ms = new ArrayList();
 ArrayList<float[]> mt = new ArrayList();
 void drawVectors2D()
 {
-  float zeros_m[] = {0, 0};
+  float zeros_m[] = {0};
   if (displayCnt == 1)
   {
-    ma.add(displayCnt-1, zeros_m);
-    mv.add(displayCnt-1, zeros_m);
-    ms.add(displayCnt-1, zeros_m);
-    mt.add(displayCnt-1, zeros_m);
+    ma.add(0, zeros_m);
+    mv.add(0, zeros_m);
+    ms.add(0, zeros_m);
+    mt.add(0, zeros_m);
   }
   
   if (vectorCnt_old != vectorCnt)
-  {    
+  { 
     float ax = accelerationVector.get(vectorCnt_old)[0];
     float ay = accelerationVector.get(vectorCnt_old)[1];
     float az = accelerationVector.get(vectorCnt_old)[2];
     float a_old = ma.get(displayCnt-1)[0];
-    float a_new = az * 10;//sqrt(ax*ax + ay*ay + az*az) * 10;
+    float a_new[] = {az * 10};//{sign(ax)*sign(ay)*sign(az)*sqrt(ax*ax + ay*ay + az*az) * 10};
+    ma.add(displayCnt, a_new);    
     
     float vx = velocityVector.get(vectorCnt_old)[0];
     float vy = velocityVector.get(vectorCnt_old)[1];
     float vz = velocityVector.get(vectorCnt_old)[2];
     float v_old = mv.get(displayCnt-1)[0];
-    float v_new = sqrt(vx*vx + vy*vy + vz*vz) * 10;
+    float v_new[] = {vz * 10};//{sign(vx)*sign(vy)*sign(vz)*sqrt(vx*vx + vy*vy + vz*vz) * 10};
+    mv.add(displayCnt, v_new);
     
-    float sx = trailVector.get(vectorCnt_old)[0];
-    float sy = trailVector.get(vectorCnt_old)[1];
-    float sz = trailVector.get(vectorCnt_old)[2];
-    float s_old = ms.get(displayCnt-1)[0];
-    float s_new = sqrt(sx*sx + sy*sy + sz*sz) * 10;
+//    float sx = trailVector.get(vectorCnt_old)[0];
+//    float sy = trailVector.get(vectorCnt_old)[1];
+//    float sz = trailVector.get(vectorCnt_old)[2];
+//    float s_old = ms.get(displayCnt-1)[0];
+//    float s_new[] = {sign(sx)*sign(sy)*sign(sz)*sqrt(sx*sx + sy*sy + sz*sz) * 10};
+//    ms.add(displayCnt, s_new);
     
-    float dt = data.get(0)[0] / 1000000 * 10;  //blup data.get(0) aktuell???
+    float dt = data.get(vectorCnt_old)[0] / 1000000 * 10;
     float t_old = mt.get(displayCnt-1)[0];
-    float t_new = t_old + dt;
-    
-    ma.add(displayCnt, zeros_m);
-    ma.get(displayCnt)[0] = a_new;
-    
-    mv.add(displayCnt, zeros_m);
-    mv.get(displayCnt)[0] = v_new;
-    
-    ms.add(displayCnt, zeros_m);
-    ms.get(displayCnt)[0] = s_new;
-    
-    mt.add(displayCnt, zeros_m);
-    mt.get(displayCnt)[0] = t_new;
-    
+    float t_new[] = {t_old + dt};
+    mt.add(displayCnt, t_new);
+
     displayCnt++;
     vectorCnt_old = vectorCnt;
   }
@@ -680,9 +672,9 @@ void drawVectors2D()
   {
     stroke(50, 50, 255);
     line(mt.get(n-1)[0], ma.get(n-1)[0], mt.get(n)[0], ma.get(n)[0]);
-    
-    //stroke(50, 250, 55);
-    //line(mt.get(n-1)[0], mv.get(n-1)[0], mt.get(n)[0], mv.get(n)[0]);
+        
+    stroke(50, 250, 55);
+    line(mt.get(n-1)[0], mv.get(n-1)[0], mt.get(n)[0], mv.get(n)[0]);
     
     //stroke(250, 50, 55);
     //line(mt.get(n-1)[0], ms.get(n-1)[0], mt.get(n)[0], ms.get(n)[0]);
