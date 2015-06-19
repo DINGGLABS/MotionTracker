@@ -3,20 +3,22 @@ import processing.serial.*;
 
 /* defines */
 int X = 800;
-int Y = 600;
+int Y = 800;
 
 int REF_H = 400;
 int REF_B = 150;
 
+int TEXT_SIZE = 50;
 int LINE_OFFSET = 200;
   
-int NUMBER_OF_SENSOR_DATA = 11;         // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T (in this order!)
-float GRAVITY = 9.81;                   // will be used if ENABLE_CALIBRATION is disabled
-float MAX_GYRO_MAGNITUDE = 300;         // will be used if CHANGING_FILTER_CONSTANT is enabled
-float FILTER_CONSTANT = 0.5;            // will be used if CHANGING_FILTER_CONSTANT is disabled
-float LP_FILTER_CONSTANT_ACCEL = 0.999;  // low pass filter constant for the  accelerations
-float ACCEL_THRESHOLD = 0.5;            // threshold in m/s^2 to observe before integrating the accelerations
-int NUMBER_OF_DATA_TO_CALIBRATE = 200;  // 
+int NUMBER_OF_SENSOR_DATA = 11;              // dt, ax, ay, az, Bx, By, Bz, Gxy, Gxz, Gyz, T (in this order!)
+float GRAVITY = 9.81;                        // will be used if ENABLE_CALIBRATION is disabled
+float MAX_GYRO_MAGNITUDE = 200;              // will be used if CHANGING_FILTER_CONSTANT is enabled
+float FILTER_CONSTANT = 0.5;                 // will be used if CHANGING_FILTER_CONSTANT is disabled (the bigger the more you trust the gyro values)
+float LP_FILTER_CONSTANT_ACCEL = 0.999;      // low pass filter constant for the  accelerations
+float ACCEL_THRESHOLD = 0.5;                 // threshold in m/s^2 to observe before integrating the accelerations
+int COUNTS_BEFORE_RESETTING_VELOCITY = 10;   // counts the acceleration needs to be withing defined threshold before the velocity will be resetted
+int NUMBER_OF_DATA_TO_CALIBRATE = 200;
 
 /* communication */
 int BAUDRATE = 112600;
@@ -25,13 +27,14 @@ boolean firstContact = false;
 String s = "knock";  // handshacke key
 
 /* switches */
-boolean ENABLE_CALIBRATION = true;                // enable the calibration
-boolean FILTER_ACCELERATIONS = true;              // filters the accelerations
+boolean ENABLE_CALIBRATION = true;                // enable the calibration to get gravity magnitude
+boolean FILTER_ACCELERATIONS = false;             // filters the accelerations with a low pass
 boolean CHANGING_FILTER_CONSTANT = false;         // recalculate filter constant on base of current gyro magnitude and MAX_GYRO_MAGNITUDE
 boolean USE_MAGNETOMETER = false;                 // uses the more accurate magnetometer to calculate the heading instead of the acceleration vector
 boolean REMOVE_G_VECTOR = true;                   // remove g-vector
 boolean ROTATE = true;                            // rotate data to fit them to the room coordinate system
-boolean ACCEL_NOISE_NEAR_ZERO_CANCELING = false;   // cut off the acceleration noise near 0 by taking an ACCEL_TRESHHOLD into account
+boolean ACCEL_NOISE_NEAR_ZERO_CANCELING = false;  // cut off the acceleration noise near 0 by taking an ACCEL_TRESHHOLD into account
+boolean RESET_VELOCITY_IF_ACCEL_CONSTANT = true;  // resets the velocity if the acceleration is constant for some time
 boolean REMOVE_ORIENTATION_OFFSET = true;         // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
 //boolean EXP_ERROR_CORRECTION = true;              // remove exponential velocity errors
 
@@ -41,7 +44,7 @@ boolean SHOW_FILTERED_ORIENTATION = true;         // shows the orientation befor
 //boolean SHOW_EXP_ERROR_CORRECTION = false;        // shows velocity vectors after the exponential error corrections
 boolean SHOW_VECTORS = true;                      // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
 
-boolean DISPLAY_FLOATING_OBJECT = false;          // display floating object which moves according the current orientation, display 2D diagrams otherwise
+boolean DISPLAY_3D_OBJECT = false;                // display 3D object which moves according the current orientation, otherwise display 2D diagrams
 
 ///* drawing multiplicators */
 //int ma = 10;
@@ -51,6 +54,7 @@ boolean DISPLAY_FLOATING_OBJECT = false;          // display floating object whi
 /* global variables */
 int mX, mY;    // mouse coordinates
 int scaleFactor;
+float translateX;
 float translateZ;
 
 Serial myPort;
@@ -74,10 +78,11 @@ boolean calibrationFlag = true;
 void setup()
 {
   /* setup window */
-  size(X, Y, P3D);
-  //background(255, 255, 255);
-  textSize(20);
-  stroke(255);
+  if (DISPLAY_3D_OBJECT) size(X, Y, P3D);
+  else size(X, Y);
+  background(150, 150, 150);
+  textSize(TEXT_SIZE);
+  stroke(255, 0, 0);
   scaleFactor = 1;
   
   /* init serial port */
@@ -98,11 +103,11 @@ void draw()
 { 
   if (calibrationFlag)
   {
-    text("Calibrating", X/2-6*10, Y/2);
+    text("Calibrating", X/2-5*TEXT_SIZE/2, Y/2);
   }
   else
   {
-    if (DISPLAY_FLOATING_OBJECT)
+    if (DISPLAY_3D_OBJECT)
     {
       draw3DDiagramAxes();
       
@@ -123,8 +128,8 @@ void draw()
 /*------------------------------------------------------------------*/
 void mouseWheel(MouseEvent e)
 {
-  translateZ -= e.getCount() * 5;
-  scaleFactor += e.getCount() / 100;
+    translateZ -= e.getCount() * 5;
+    scaleFactor += e.getCount() / 100;
 }
 /*------------------------------------------------------------------*/
 
@@ -462,8 +467,9 @@ float[] getGravityVector(float roll, float pitch)
 /*------------------------------------------------------------------*/ 
 
 /*------------------------------------------------------------------*/ 
-int vCnt = 0;  // global counter
-
+int vXCnt = 0;  // global counter
+int vYCnt = 0;  // global counter
+int vZCnt = 0;  // global counter
 /* integrate acceleration vector to get the velocity vector */
 float[] getVelocityVector(int vectorNr, float dt)
 {
@@ -477,37 +483,39 @@ float[] getVelocityVector(int vectorNr, float dt)
   float vy = velocityVector.get(vectorNr-1)[1];
   float vz = velocityVector.get(vectorNr-1)[2];
   
-//  /* take a threshold into account before integrating */
-//  if (abs(ax) > ACCEL_THRESHOLD)
-//  {
-//    vx += ax * dt;
-//    vCnt = 0;
-//  }
-//  else vCnt++;
-//  if (abs(ay) > ACCEL_THRESHOLD)
-//  {
-//    vy += ay * dt;
-//    vCnt = 0;
-//  }
-//  else vCnt++;
-//  if (abs(az) > ACCEL_THRESHOLD)
-//  {
-//    vz += az * dt;
-//    vCnt = 0;
-//  }
-//  else vCnt++;
-//  
-//  /* reset velocity if it's constant for some time */
-//  if (vCnt >= 10)  //blup
-//  {
-//    vx = 0;
-//    vy = 0;
-//    vz = 0;
-//  }
-  
-  vx += ax * dt;
-  vy += ay * dt;
-  vz += az * dt;
+  if (RESET_VELOCITY_IF_ACCEL_CONSTANT)
+  {
+    /* take a threshold into account before integrating */
+    if (abs(ax) > ACCEL_THRESHOLD)
+    {
+      vx += ax * dt;
+      vXCnt = 0;
+    }
+    else vXCnt++;
+    if (abs(ay) > ACCEL_THRESHOLD)
+    {
+      vy += ay * dt;
+      vYCnt = 0;
+    }
+    else vYCnt++;
+    if (abs(az) > ACCEL_THRESHOLD)
+    {
+      vz += az * dt;
+      vZCnt = 0;
+    }
+    else vZCnt++;
+    
+    /* reset velocity if acceleration is constant for some time */
+    if (vXCnt >= COUNTS_BEFORE_RESETTING_VELOCITY) vx = 0;
+    if (vYCnt >= COUNTS_BEFORE_RESETTING_VELOCITY) vy = 0;
+    if (vZCnt >= COUNTS_BEFORE_RESETTING_VELOCITY) vz = 0;
+  }
+  else
+  {
+    vx += ax * dt;
+    vy += ay * dt;
+    vz += az * dt;
+  }
   
   float v[] = {vx, vy, vz}; 
   return v;
@@ -558,47 +566,42 @@ void showVectors(int vectorNr)
 void draw2DDiagramAxes()
 {
   background(0);
-  translate(width/4, height/4, -height/2);
   
   pushMatrix();
-  translate(0, 0, translateZ);
   scale(scaleFactor);
   
   if(mousePressed)
   {
-    mX = mouseY;
-    mY = mouseX;
+    mX = mouseX;
+    mY = mouseY;
   }
   
-  rotateX(map(mX, 0, height, -PI, PI));
-  rotateY(map(mY, 0, height, -PI, PI));
+  translate(0, LINE_OFFSET);
   
-  draw2DAxes(X, 30);
+  draw2DAxes(X/10*9, 30);
 }
 /*------------------------------------------------------------------*/  
 
 /*------------------------------------------------------------------*/
-void draw2DAxes(int l, int textOffset)
+void draw2DAxes(int l, int to)
 {
-  int tl = l + textOffset;
+  textSize(TEXT_SIZE/2);
+  
   fill(255, 255, 255);
   stroke(255, 0, 0);  // red
-  line(0, 0, 0, l, 0, 0);
-  text("+tx", l, 0, 0);
-  text("-tx", -tl, 0, 0);
+  line(0, 0, l, 0);
+  text("+tx", l, 0);
   
-  line(0, LINE_OFFSET, 0, l, LINE_OFFSET, 0);
-  text("+ty", l, LINE_OFFSET, 0);
-  text("-ty", -tl, LINE_OFFSET, 0);
+  line(0, LINE_OFFSET, l, LINE_OFFSET);
+  text("+ty", l, LINE_OFFSET);
   
-  line(0, 2*LINE_OFFSET, 0, l, 2*LINE_OFFSET, 0);
-  text("+tz", l, 2*LINE_OFFSET, 0);
-  text("-tz", -tl, 2*LINE_OFFSET, 0);
+  line(0, 2*LINE_OFFSET, l, 2*LINE_OFFSET);
+  text("+tz", l, 2*LINE_OFFSET);
   
   stroke(0, 255, 0);  // green
-  line(0, -l, 0, 0, l, 0);
-  text("+var", 0, tl, 0);
-  text("-var", 0, -l, 0);
+  line(0, -l, 0, l);
+  text("+var", 0, l-to);
+  text("-var", 0, -LINE_OFFSET+to);
 }
 /*------------------------------------------------------------------*/
 
@@ -621,13 +624,15 @@ void draw3DDiagramAxes()
   rotateX(map(mX, 0, height, -PI, PI));
   rotateY(map(mY, 0, height, -PI, PI));
   
-  draw3DAxes(X/3*2, 30);
+  draw3DAxes(X, 30);
 }
 /*------------------------------------------------------------------*/  
 
 /*------------------------------------------------------------------*/
 void draw3DAxes(int l, int textOffset)
 {
+  textSize(TEXT_SIZE/2);
+  
   int tl = l + textOffset;
   fill(255, 255, 255);
   stroke(255, 0, 0);  // red
@@ -681,16 +686,18 @@ void drawVectors2D()
     float v_new[] = {vx*kv, vy*kv, vz*kv};
     mv.add(displayCnt, v_new);
     
-//    float sx = trailVector.get(vectorCnt_old)[0];
-//    float sy = trailVector.get(vectorCnt_old)[1];
-//    float sz = trailVector.get(vectorCnt_old)[2];
-//    float s_old = ms.get(displayCnt-1)[0];
-//    float s_new[] = {sign(sx)*sign(sy)*sign(sz)*sqrt(sx*sx + sy*sy + sz*sz) * 10};
-//    ms.add(displayCnt, s_new);
+    float ks = 50;
+    float sx = trailVector.get(vectorCnt_old)[0];
+    float sy = trailVector.get(vectorCnt_old)[1];
+    float sz = trailVector.get(vectorCnt_old)[2];
+    float s_old = ms.get(displayCnt-1)[0];
+    float s_new[] = {vx*ks, vy*ks, vz*ks};
+    ms.add(displayCnt, s_new);
     
+    float kt = 5;
     float dt = data.get(vectorCnt_old)[0] / 1000000 * 10;
     float t_old = mt.get(displayCnt-1)[0];
-    float t_new[] = {t_old + dt};
+    float t_new[] = {t_old + dt*kt};
     mt.add(displayCnt, t_new);
 
     displayCnt++;
@@ -709,8 +716,15 @@ void drawVectors2D()
     line(mt.get(n-1)[0], mv.get(n-1)[1]+LINE_OFFSET, mt.get(n)[0], mv.get(n)[1]+LINE_OFFSET);
     line(mt.get(n-1)[0], mv.get(n-1)[2]+2*LINE_OFFSET, mt.get(n)[0], mv.get(n)[2]+2*LINE_OFFSET);
     
-    //stroke(250, 50, 55);
-    //line(mt.get(n-1)[0], ms.get(n-1)[0], mt.get(n)[0], ms.get(n)[0]);
+    stroke(250, 50, 55);
+    line(mt.get(n-1)[0], ms.get(n-1)[0], mt.get(n)[0], ms.get(n)[0]);
+    line(mt.get(n-1)[0], ms.get(n-1)[1]+LINE_OFFSET, mt.get(n)[0], ms.get(n)[1]+LINE_OFFSET);
+    line(mt.get(n-1)[0], ms.get(n-1)[2]+2*LINE_OFFSET, mt.get(n)[0], ms.get(n)[2]+2*LINE_OFFSET);
+    
+        stroke(50, 250, 55);
+    line(mt.get(n-1)[0], mv.get(n-1)[0], mt.get(n)[0], mv.get(n)[0]);
+    line(mt.get(n-1)[0], mv.get(n-1)[1]+LINE_OFFSET, mt.get(n)[0], mv.get(n)[1]+LINE_OFFSET);
+    line(mt.get(n-1)[0], mv.get(n-1)[2]+2*LINE_OFFSET, mt.get(n)[0], mv.get(n)[2]+2*LINE_OFFSET);
   }
 }
 /*------------------------------------------------------------------*/
