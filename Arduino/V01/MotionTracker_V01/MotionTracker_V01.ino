@@ -291,7 +291,7 @@ void loop()
   lsm.getEvent(&accel, &mag, &gyro, &temp);
   
   /* wait remaining 10ms */
-  while ((micros() - us_ref) < 10000);   // wait remaining 10ms
+  //while ((micros() - us_ref) < 10000);   // wait remaining 10ms
   unsigned int dt = micros() - us_ref;   // calculate dt
   us_ref = micros();                     // set new timing reference
   
