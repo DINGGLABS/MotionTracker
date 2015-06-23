@@ -21,26 +21,31 @@ int COUNTS_BEFORE_RESETTING_VELOCITY = 10;   // counts the acceleration needs to
 int NUMBER_OF_DATA_TO_CALIBRATE = 200;
 
 /* communication */
-int BAUDRATE = 112600;
+int BAUDRATE = 115200;
 int SERIAL_PORT = 5;
 boolean firstContact = false;
 String s = "knock";  // handshacke key
 
 /* switches */
-boolean ENABLE_CALIBRATION = true;                // enable the calibration to get gravity magnitude
+boolean ENABLE_CALIBRATION = true;                // enable the calibration to get gravity magnitude and offset vectors
 boolean FILTER_ACCELERATIONS = false;             // filters the accelerations with a low pass
+boolean REMOVE_GYRO_OFFSET = true;                // removes angle velocity  -> ATTENTION: only allowed when calibrated quietly!
 boolean CHANGING_FILTER_CONSTANT = false;         // recalculate filter constant on base of current gyro magnitude and MAX_GYRO_MAGNITUDE
 boolean USE_MAGNETOMETER = false;                 // uses the more accurate magnetometer to calculate the heading instead of the acceleration vector
 boolean REMOVE_G_VECTOR = true;                   // remove g-vector
 boolean ROTATE = true;                            // rotate data to fit them to the room coordinate system
 boolean ACCEL_NOISE_NEAR_ZERO_CANCELING = false;  // cut off the acceleration noise near 0 by taking an ACCEL_TRESHHOLD into account
 boolean RESET_VELOCITY_IF_ACCEL_CONSTANT = true;  // resets the velocity if the acceleration is constant for some time
-boolean REMOVE_ORIENTATION_OFFSET = true;         // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
+boolean REMOVE_ORIENTATION_OFFSET = false;         // remove orientation offsets -> ATTENTION: only allowed when calibrated on a plane ground!
 //boolean EXP_ERROR_CORRECTION = true;              // remove exponential velocity errors
 
 boolean SHOW_RAW_DATA = true;                     // shows raw data 
-boolean SHOW_NON_FILTERED_ORIENTATIONS = true;    // shows the non filtered orientations
-boolean SHOW_FILTERED_ORIENTATION = true;         // shows the orientation before removing the orientation offset
+boolean SHOW_GYRO_OFFSET = true;                 // shows the orientation offsets from the calibration
+boolean SHOW_NON_FILTERED_ORIENTATIONS = false;    // shows the non filtered orientations
+boolean SHOW_FILTERED_ORIENTATION = false;         // shows the orientation before removing the orientation offset
+boolean SHOW_G = false;                            // shows the g magnitude from the calibration
+boolean SHOW_G_VECTOR = true;                     // shows the current g-vector
+boolean SHOW_ORIENTATION_OFFSET = false;           // shows the orientation offsets from the calibration
 //boolean SHOW_EXP_ERROR_CORRECTION = false;        // shows velocity vectors after the exponential error corrections
 boolean SHOW_VECTORS = true;                      // shows the time-delta, acceleration-, velocity-, trail- and orientation vectors
 
@@ -220,6 +225,9 @@ void serialEvent(Serial myPort)
             /* set calibration acceleration vector */
             float a_c[] = {ax_c, ay_c, az_c};
             
+            /* set calibration angle velocity vector */
+            float w_c[] = {wx_c, wy_c, wz_c};
+            
             /* get calibration orientation */
             float o_w_c[] = getOrientationGyro(vectorCnt, dt_c, wx_c, wy_c, wz_c);
             float o_a_c[] = getOrientationAccel(ax_c, ay_c, az_c);
@@ -236,7 +244,8 @@ void serialEvent(Serial myPort)
                         
             /* set global offset vectors */
             calibrations.add(0, a_c);  // accelerations
-            calibrations.add(1, o_c);  // orientation
+            calibrations.add(1, w_c);  // angle velocity
+            calibrations.add(2, o_c);  // orientation
             
             calibrationFlag = false;
           }
@@ -262,6 +271,16 @@ void serialEvent(Serial myPort)
           float wy = data.get(vectorCnt)[8];
           float wz = data.get(vectorCnt)[9];
           
+          /* remove gyro offset */
+          if (REMOVE_GYRO_OFFSET)  // ATTENTION: only allowed when calibrated quietly!
+          {
+            wx -= calibrations.get(1)[0];
+            wy -= calibrations.get(1)[1];
+            wz -= calibrations.get(1)[2];
+            
+            if (SHOW_GYRO_OFFSET) println("gyro-offset = " + calibrations.get(1)[0] + ", " + calibrations.get(1)[1] + ", " + calibrations.get(1)[2]);
+          }     
+          
           /* get orientations */
           float o_w[] = getOrientationGyro(vectorCnt, dt, wx, wy, wz);
           float o_a[] = getOrientationAccel(ax, ay, az);
@@ -284,7 +303,7 @@ void serialEvent(Serial myPort)
             a[1] -= g[1];
             a[2] -= g[2];
             
-            println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
+            if (SHOW_G_VECTOR) println("g-vector = " + g[0] + ", " + g[1] + ", " + g[2]);
           }
           
           /* rotate acceleration vector to fit them to the room coordinate system */
@@ -304,11 +323,11 @@ void serialEvent(Serial myPort)
           /* remove orientation offsets */
           if (REMOVE_ORIENTATION_OFFSET)  // ATTENTION: only allowed when calibrated on a plane ground!
           {
-            o[0] -= calibrations.get(1)[0];
-            o[1] -= calibrations.get(1)[1];
-            o[2] -= calibrations.get(1)[2];
+            o[0] -= calibrations.get(2)[0];
+            o[1] -= calibrations.get(2)[1];
+            o[2] -= calibrations.get(2)[2];
             
-            println("orientation-offset = " + calibrations.get(1)[0]*180/PI + ", " + calibrations.get(1)[1]*180/PI + ", " + calibrations.get(1)[2]*180/PI);
+            if (SHOW_ORIENTATION_OFFSET) println("orientation-offset = " + calibrations.get(2)[0]*180/PI + ", " + calibrations.get(2)[1]*180/PI + ", " + calibrations.get(2)[2]*180/PI);
           }          
           
           /* update global orientation vector */
@@ -337,11 +356,11 @@ void serialEvent(Serial myPort)
 /*------------------------------------------------------------------*/
 float[] lowPassFilter(float fc, float vec_old[], float vec_new[])
 {
-  vec_new[0] = fc * vec_new[0] + (1 - fc) * vec_old[0];
-  vec_new[1] = fc * vec_new[1] + (1 - fc) * vec_old[1];
-  vec_new[2] = fc * vec_new[2] + (1 - fc) * vec_old[2];
+  vec_old[0] = fc * vec_new[0] + (1 - fc) * vec_old[0];
+  vec_old[1] = fc * vec_new[1] + (1 - fc) * vec_old[1];
+  vec_old[2] = fc * vec_new[2] + (1 - fc) * vec_old[2];
   
-  return vec_new;
+  return vec_old;
 }
 /*------------------------------------------------------------------*/
 
@@ -365,8 +384,15 @@ float[] getOrientationGyro(int vectorNr, float dt, float wx, float wy, float wz)
 /*------------------------------------------------------------------*/
 /* calculate orientations in rad from the acceleration vector */
 float[] getOrientationAccel(float ax, float ay, float az)
-{
+{  
   float u = 0.001;  // to prevent that ax and az could be simultaneously zero and give an undefined or unstable estimate of the roll angle
+  
+  /* normalize acceleratons */
+  float a_amount = sqrt(ax*ax + ay*ay + az*az);
+  ax /= a_amount;
+  ay /= a_amount;
+  az /= a_amount;
+  
   float roll_a    = atan2(ay, sign(az)*sqrt(az*az + u*ax*ax));  //atan2(ay, az);  // get roll (yz-axis rotation) -> -PI... PI
   float pitch_a   = atan2(ax, sqrt(ay*ay + az*az));             // get pitch (xz-axis rotation) -> -PI/2... PI/2  //blup -PI... PI would be better!
   float heading_a = atan2(ay, ax);                              // get heading (xy-axis rotation) -> -PI... PI
@@ -463,7 +489,7 @@ float[] getGravityVector(float roll, float pitch)
   float gy = gravity * cos(pitch) * sin(roll);
   float gz = gravity * cos(pitch) * cos(roll);
   
-  println("g = " + gravity);
+  if (SHOW_G) println("g = " + gravity);
   
   float g[] = {gx, gy, gz};
   return g;

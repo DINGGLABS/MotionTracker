@@ -27,11 +27,11 @@
 
 /* sensor defines */
 #define NUMBER_OF_DIFFERENT_DATA        11    // t, ax, ay, az, Bx, By, Bz, wx, wy, wz, T (in this order!)
-//#define MEAN                            2    // number of data to summarize before saving
-//#define MEDIAN                        true    // comment out to use MEAN calculation -> uses a lot more RAM!
-#define LP_FILTER                     true    // 
+#define MEAN                             5    // number of data to summarize before saving
+//#define MEDIAN                        true    // comment out to use MEAN calculation -> uses MEAN and a lot more RAM!
+//#define LP_FILTER                     true    // low pass filter
 
-#define FILTER_CONSTANT               0.9375  // 
+#define FILTER_CONSTANT              0.993    // alpha = dt / (tau + dt) = 15ms / (100us + 15ms)
 
 /* timer interrupt */               // 78 -> 10ms, 117 -> 15ms, 156 -> 20ms
 #define INTERRUPT_FREQUENCY_DIVISOR_1  156//117//78    // t_isr = 1/(8000000/(prescaler*VALUE))
@@ -298,8 +298,8 @@ void loop()
   /* get sensor data */
   lsm.getEvent(&accel, &mag, &gyro, &temp);
   
-  /* wait remaining 10ms */
-  //while ((micros() - us_ref) < 10000);   // wait remaining 10ms
+  /* wait remaining 15ms */
+  //while ((micros() - us_ref) < 15000);   // wait remaining 15ms
   unsigned int dt = micros() - us_ref;   // calculate dt
   us_ref = micros();                     // set new timing reference
   
@@ -307,7 +307,7 @@ void loop()
   #ifdef MEDIAN  // use median
   {
     /* collect data */
-    dataArray2D[0][meanCntr]  = dt;
+    dataArray2D[0][0] += dt;
     dataArray2D[1][meanCntr]  = accel.acceleration.x;
     dataArray2D[2][meanCntr]  = accel.acceleration.y;
     dataArray2D[3][meanCntr]  = accel.acceleration.z;
@@ -327,30 +327,34 @@ void loop()
       
       /* sort arrays */
       for (byte i = 1; i < NUMBER_OF_DIFFERENT_DATA; i++) qsort(dataArray2D[i], MEAN, sizeof(float), cmpfunc);
-  
+      
+      int n = round((float)MEAN/2);
+      //Serial.println(n);
+      
       /* print timestamp in us */
-      Serial.print(micros()); Serial.print(", ");                      // t
+      //Serial.print(micros()); Serial.print(", ");                 // t
   
       /* print delta time in us */
-      Serial.print(dataArray2D[0][MEAN-1]); Serial.print(", ");        // dt
-          
+      Serial.print(dataArray2D[0][0]); Serial.print(", ");        // dt
+      dataArray2D[0][0] = 0;
+      
       /* print acceleration data in m/s^2 */
-      Serial.print(dataArray2D[1][MEAN/2]); Serial.print(", ");        // ax
-      Serial.print(dataArray2D[2][MEAN/2]); Serial.print(", ");        // ay
-      Serial.print(dataArray2D[3][MEAN/2]); Serial.print(", ");        // az
+      Serial.print(dataArray2D[1][n]); Serial.print(", ");        // ax
+      Serial.print(dataArray2D[2][n]); Serial.print(", ");        // ay
+      Serial.print(dataArray2D[3][n]); Serial.print(", ");        // az
       
       /* print magnetometer data in Gs */
-      Serial.print(dataArray2D[4][MEAN/2]); Serial.print(", ");        // Bx
-      Serial.print(dataArray2D[5][MEAN/2]); Serial.print(", ");        // By
-      Serial.print(dataArray2D[6][MEAN/2]); Serial.print(", ");        // Bz
+      Serial.print(dataArray2D[4][n]); Serial.print(", ");        // Bx
+      Serial.print(dataArray2D[5][n]); Serial.print(", ");        // By
+      Serial.print(dataArray2D[6][n]); Serial.print(", ");        // Bz
       
       /* print gyroscop data in °/s */
-      Serial.print(dataArray2D[7][MEAN/2]); Serial.print(", ");        // wx
-      Serial.print(dataArray2D[8][MEAN/2]); Serial.print(", ");        // wy
-      Serial.print(dataArray2D[9][MEAN/2]); Serial.print(", ");        // wz
+      Serial.print(dataArray2D[7][n]); Serial.print(", ");        // wx
+      Serial.print(dataArray2D[8][n]); Serial.print(", ");        // wy
+      Serial.print(dataArray2D[9][n]); Serial.print(", ");        // wz
       
       /* print temp data in °C */
-      Serial.println(dataArray2D[10][MEAN/2]);                         // T
+      Serial.println(dataArray2D[10][n]);                         // T
     }
   }
   #endif
@@ -376,14 +380,14 @@ void loop()
     {
       meanCntr = 0;
       
-      /* divide data by MEAN */
-      for (byte i = 0; i < NUMBER_OF_DIFFERENT_DATA; i++) dataArray[i] /= MEAN;
+      /* divide data by MEAN (except dt) */
+      for (byte i = 1; i < NUMBER_OF_DIFFERENT_DATA; i++) dataArray[i] /= MEAN;
   
 //      /* print timestamp in us */
 //      Serial.print(micros()); Serial.print(", ");            // t
   
       /* print delta time in us */
-      Serial.print(dataArray[0] * MEAN); Serial.print(", "); // dt
+      Serial.print(dataArray[0]); Serial.print(", ");        // dt
           
       /* print acceleration data in m/s^2 */
       Serial.print(dataArray[1]); Serial.print(", ");        // ax
