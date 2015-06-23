@@ -15,7 +15,7 @@ int NUMBER_OF_SENSOR_DATA = 11;              // dt, ax, ay, az, Bx, By, Bz, Gxy,
 float GRAVITY = 9.81;                        // will be used if ENABLE_CALIBRATION is disabled
 float MAX_GYRO_MAGNITUDE = 200;              // will be used if CHANGING_FILTER_CONSTANT is enabled
 float FILTER_CONSTANT = 0.5;                 // will be used if CHANGING_FILTER_CONSTANT is disabled (the bigger the more you trust the gyro values)
-float LP_FILTER_CONSTANT_ACCEL = 0.999;      // low pass filter constant for the  accelerations
+float TAU_LP_FILTER = 0.1;                   // low pass filter time constant for the accelerations (tau is the length of signals the filter should act on)
 float ACCEL_THRESHOLD = 0.5;                 // threshold in m/s^2 to observe before integrating the accelerations
 int COUNTS_BEFORE_RESETTING_VELOCITY = 10;   // counts the acceleration needs to be withing defined threshold before the velocity will be resetted
 int NUMBER_OF_DATA_TO_CALIBRATE = 200;
@@ -46,10 +46,11 @@ boolean SHOW_VECTORS = true;                      // shows the time-delta, accel
 
 boolean DISPLAY_3D_OBJECT = false;                // display 3D object which moves according the current orientation, otherwise display 2D diagrams
 
-///* drawing multiplicators */
-//int ma = 10;
-//int mv = 10;
-//int ms = 10;
+/* drawing multiplicators */
+int ka = 10;
+int kv = 20;
+int ks = 50;
+int kt = 5;
 
 /* global variables */
 int mX, mY;    // mouse coordinates
@@ -86,6 +87,7 @@ void setup()
   scaleFactor = 1;
   
   /* init serial port */
+  println(Serial.list());
   myPort = new Serial(this, Serial.list()[SERIAL_PORT], BAUDRATE);
   
   /* init first vectors with zeros */       
@@ -138,6 +140,7 @@ void keyPressed()
 {
   float zeros[] = {0, 0, 0};
   velocityVector.set(vectorCnt-1, zeros);
+  trailVector.set(vectorCnt-1, zeros);
   displayCnt = 1;
 }
 /*------------------------------------------------------------------*/
@@ -251,7 +254,8 @@ void serialEvent(Serial myPort)
           float a[] = {ax, ay, az}; 
           
           /* filter a */
-          if (FILTER_ACCELERATIONS && vectorCnt != 0) a = lowPassFilter(LP_FILTER_CONSTANT_ACCEL, accelerationVector.get(vectorCnt-1), a);
+          float LP_filterConstant = TAU_LP_FILTER / (TAU_LP_FILTER + dt);
+          if (FILTER_ACCELERATIONS && vectorCnt != 0) a = lowPassFilter(LP_filterConstant, accelerationVector.get(vectorCnt-1), a);
           
           /* get w */
           float wx = data.get(vectorCnt)[7];
@@ -382,7 +386,7 @@ float[] fuseOrientations(int vectorNr, float fc, float o_w[], float o_a[])  // t
   if (CHANGING_FILTER_CONSTANT)
   {
     float w_magnitude = sqrt(sq(data.get(vectorNr)[7]) + sq(data.get(vectorNr)[8]) + sq(data.get(vectorNr)[9]));
-    fc = constrain(mapFloat(abs(w_magnitude), 0, MAX_GYRO_MAGNITUDE, 0, 1), 0, 1);  // map and limit gyro magnitude to 0... 1
+    fc = constrain(mapFloat(w_magnitude, 0, MAX_GYRO_MAGNITUDE, 0, 1), 0, 1);  // map and limit gyro magnitude to 0... 1
   }
 
   float roll    = fc * o_w[0] + (1 - fc) * o_a[0];
@@ -670,7 +674,7 @@ void drawVectors2D()
   
   if (vectorCnt_old != vectorCnt)
   { 
-    float ka = 10;
+    //float ka = 10;
     float ax = accelerationVector.get(vectorCnt_old)[0];
     float ay = accelerationVector.get(vectorCnt_old)[1];
     float az = accelerationVector.get(vectorCnt_old)[2];
@@ -678,7 +682,7 @@ void drawVectors2D()
     float a_new[] = {ax*ka, ay*ka, az*ka};
     ma.add(displayCnt, a_new);    
     
-    float kv = 10;
+    //float kv = 10;
     float vx = velocityVector.get(vectorCnt_old)[0];
     float vy = velocityVector.get(vectorCnt_old)[1];
     float vz = velocityVector.get(vectorCnt_old)[2];
@@ -686,7 +690,7 @@ void drawVectors2D()
     float v_new[] = {vx*kv, vy*kv, vz*kv};
     mv.add(displayCnt, v_new);
     
-    float ks = 50;
+    //float ks = 50;
     float sx = trailVector.get(vectorCnt_old)[0];
     float sy = trailVector.get(vectorCnt_old)[1];
     float sz = trailVector.get(vectorCnt_old)[2];
@@ -694,7 +698,7 @@ void drawVectors2D()
     float s_new[] = {vx*ks, vy*ks, vz*ks};
     ms.add(displayCnt, s_new);
     
-    float kt = 5;
+    //float kt = 5;
     float dt = data.get(vectorCnt_old)[0] / 1000000 * 10;
     float t_old = mt.get(displayCnt-1)[0];
     float t_new[] = {t_old + dt*kt};

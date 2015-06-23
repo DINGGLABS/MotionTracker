@@ -27,8 +27,11 @@
 
 /* sensor defines */
 #define NUMBER_OF_DIFFERENT_DATA        11    // t, ax, ay, az, Bx, By, Bz, wx, wy, wz, T (in this order!)
-//#define MEAN                            10    // number of data to summarize before saving
-//#define MEDIAN                        true    // comment out to use MEAN calculation -> uses a lot mor RAM!
+//#define MEAN                            2    // number of data to summarize before saving
+//#define MEDIAN                        true    // comment out to use MEAN calculation -> uses a lot more RAM!
+#define LP_FILTER                     true    // 
+
+#define FILTER_CONSTANT               0.9375  // 
 
 /* timer interrupt */               // 78 -> 10ms, 117 -> 15ms, 156 -> 20ms
 #define INTERRUPT_FREQUENCY_DIVISOR_1  156//117//78    // t_isr = 1/(8000000/(prescaler*VALUE))
@@ -178,11 +181,16 @@ sensors_event_t accel, mag, gyro, temp;
 volatile unsigned int timerInterruptCounter = 0;
 
 /* sensor data array */
+#ifndef LP_FILTER
 #ifdef MEDIAN
 float dataArray2D[NUMBER_OF_DIFFERENT_DATA][MEAN];  // 440 bytes
 #endif
 #ifndef MEDIAN
 float dataArray[NUMBER_OF_DIFFERENT_DATA];  // 44 bytes
+#endif
+#endif
+#ifdef LP_FILTER
+float dataArray[NUMBER_OF_DIFFERENT_DATA][2];  // 88 bytes
 #endif
 byte meanCntr = 0;
 
@@ -295,9 +303,10 @@ void loop()
   unsigned int dt = micros() - us_ref;   // calculate dt
   us_ref = micros();                     // set new timing reference
   
-  /* collect data */
+  #ifndef LP_FILTER
   #ifdef MEDIAN  // use median
   {
+    /* collect data */
     dataArray2D[0][meanCntr]  = dt;
     dataArray2D[1][meanCntr]  = accel.acceleration.x;
     dataArray2D[2][meanCntr]  = accel.acceleration.y;
@@ -345,8 +354,9 @@ void loop()
     }
   }
   #endif
-  #ifndef MEDIAN
+  
   #ifdef MEAN  // use mean
+  #ifndef MEDIAN
   {
     dataArray[0]  += dt;
     dataArray[1]  += accel.acceleration.x;
@@ -399,7 +409,9 @@ void loop()
   }
   #endif
   #endif
-  #ifndef MEDIAN  // use neither median nor mean
+  
+  #ifndef MEAN
+  #ifndef MEDIAN  // use neither median, mean nor lp-filter
   {
     dataArray[0]  = dt;
     dataArray[1]  = accel.acceleration.x;
@@ -412,7 +424,7 @@ void loop()
     dataArray[8]  = gyro.gyro.y;
     dataArray[9]  = gyro.gyro.z;
     dataArray[10] = temp.temperature;
-    
+        
 //    /* print timestamp in us */
 //    Serial.print(micros()); Serial.print(", ");            // t
   
@@ -438,9 +450,54 @@ void loop()
     Serial.println(dataArray[10]);                         // T
   }
   #endif  
-
+  #endif
+  #endif  // endif LP_FILTER
   
+  #ifdef LP_FILTER  // use low pass filter
+  {
+    dataArray[0][0]  = dt;
+    dataArray[1][0]  = accel.acceleration.x;
+    dataArray[2][0]  = accel.acceleration.y;
+    dataArray[3][0]  = accel.acceleration.z;
+    dataArray[4][0]  = mag.magnetic.x;
+    dataArray[5][0]  = mag.magnetic.y;
+    dataArray[6][0]  = mag.magnetic.z;
+    dataArray[7][0]  = gyro.gyro.x;
+    dataArray[8][0]  = gyro.gyro.y;
+    dataArray[9][0]  = gyro.gyro.z;
+    dataArray[10][0] = temp.temperature;
+    
+    /* low pass filter */
+    // a_old = alpha * a_new + (1 - alpha) * a_old
+    dataArray[1][1] = FILTER_CONSTANT * dataArray[1][0] + (1 - FILTER_CONSTANT) * dataArray[1][1];
+    dataArray[2][1] = FILTER_CONSTANT * dataArray[2][0] + (1 - FILTER_CONSTANT) * dataArray[2][1];
+    dataArray[3][1] = FILTER_CONSTANT * dataArray[3][0] + (1 - FILTER_CONSTANT) * dataArray[3][1];
+    
+//    /* print timestamp in us */
+//    Serial.print(micros()); Serial.print(", ");            // t
   
+    /* print delta time in us */
+    Serial.print(dataArray[0][0]); Serial.print(", ");        // dt
+        
+    /* print acceleration data in m/s^2 */
+    Serial.print(dataArray[1][1]); Serial.print(", ");        // ax
+    Serial.print(dataArray[2][1]); Serial.print(", ");        // ay
+    Serial.print(dataArray[3][1]); Serial.print(", ");        // az
+    
+    /* print magnetometer data in Gs */
+    Serial.print(dataArray[4][0]); Serial.print(", ");        // Bx
+    Serial.print(dataArray[5][0]); Serial.print(", ");        // By
+    Serial.print(dataArray[6][0]); Serial.print(", ");        // Bz
+    
+    /* print gyroscop data in °/s */
+    Serial.print(dataArray[7][0]); Serial.print(", ");        // wx
+    Serial.print(dataArray[8][0]); Serial.print(", ");        // wy
+    Serial.print(dataArray[9][0]); Serial.print(", ");        // wz
+    
+    /* print temp data in °C */
+    Serial.println(dataArray[10][0]);                         // T
+  }
+  #endif
   
   
   
@@ -596,7 +653,7 @@ void configureSensor(void)
   // 1.) Set the accelerometer range
   lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_2G);
   //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_4G);
-  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_6G);
+  //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_6G);  // max by human gestures
   //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_8G);
   //lsm.setupAccel(lsm.LSM9DS0_ACCELRANGE_16G);
   
